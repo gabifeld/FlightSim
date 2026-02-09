@@ -5,6 +5,7 @@ import { getTerrainHeight } from './terrain.js';
 import { getWeatherState } from './weather.js';
 import { clamp } from './utils.js';
 import { getGamepadState, isGamepadConnected } from './gamepad.js';
+import { getMobileState, isMobileActive } from './mobile.js';
 import { isAPEngaged, getAPState, updateAutopilot } from './autopilot.js';
 import {
   GRAVITY,
@@ -108,6 +109,17 @@ export function updatePhysics(dt) {
     // Gamepad throttle (absolute positioning)
     if (gp.throttleInput > -0.9) {
       state.throttle = clamp((gp.throttleInput + 1) / 2, 0, 1);
+    }
+  }
+
+  // Merge mobile tilt/touch inputs
+  if (isMobileActive()) {
+    const mob = getMobileState();
+    pitchInput = clamp(pitchInput + mob.pitchInput, -1, 1);
+    rollInput = clamp(rollInput + mob.rollInput, -1, 1);
+    yawInput = clamp(yawInput + mob.yawInput, -1, 1);
+    if (mob.throttleInput >= 0) {
+      state.throttle = clamp(mob.throttleInput, 0, 1);
     }
   }
 
@@ -295,7 +307,7 @@ export function updatePhysics(dt) {
 
   // Ground friction
   if (state.onGround) {
-    const isBraking = keys[' '];
+    const isBraking = keys[' '] || (isMobileActive() && getMobileState().brakeActive);
     if (state.speed > 0.1) {
       const frictionCoeff = isBraking ? BRAKE_FRICTION : GROUND_FRICTION;
       const frictionMag = frictionCoeff * mass * GRAVITY;

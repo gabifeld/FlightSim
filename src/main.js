@@ -27,6 +27,7 @@ import { initWeatherFx, updateWeatherFx, setAmbientRef, getCurrentPreset, WEATHE
 import { initReplay, updateRecording, updateReplay, isReplayPlaying } from './replay.js';
 import { initAirportLights, updateAirportLights, setNightMode } from './airportLights.js';
 import { initGamepad } from './gamepad.js';
+import { initMobile, updateMobile } from './mobile.js';
 import { initAutopilot } from './autopilot.js';
 import { initMenu, isPaused, isMenuOpen, setMenuCallbacks, onGameStart } from './menu.js';
 import { createCity, updateCityNight } from './city.js';
@@ -83,6 +84,9 @@ initReplay();
 // Gamepad
 initGamepad();
 
+// Mobile touch/tilt controls
+initMobile();
+
 // Controls
 initControls();
 setCallbacks({
@@ -127,6 +131,7 @@ function ensureAudio() {
 }
 window.addEventListener('keydown', ensureAudio, { once: true });
 window.addEventListener('click', ensureAudio, { once: true });
+window.addEventListener('touchstart', ensureAudio, { once: true });
 
 // Game loop
 let lastTime = performance.now();
@@ -155,6 +160,7 @@ function gameLoop(time) {
       if (state !== FlightState.CRASHED) {
         updateThrottle(dt);
         updateControlsGamepad();
+        updateMobile(dt);
         updatePhysics(dt);
       }
 
