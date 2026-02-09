@@ -9,6 +9,7 @@ import {
   isLandingMode,
   recordTouchdown,
   resetLandingMode,
+  disableLandingAssist,
 } from './landing.js';
 import {
   TAKEOFF_SPEED,
@@ -39,6 +40,7 @@ export function resetState() {
   messageTimer = 0;
   clearMessage();
   hideLandingScore();
+  disableLandingAssist();
 
   if (isLandingMode()) {
     resetLandingMode();

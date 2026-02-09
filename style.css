@@ -774,6 +774,24 @@ body {
   color: rgba(160, 200, 255, 0.3);
 }
 
+/* ─── Landing Assist Indicator ─── */
+.landing-assist-indicator {
+  position: absolute;
+  top: 55px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: #44dd66;
+  text-shadow: 0 0 10px rgba(68, 221, 102, 0.5);
+  padding: 3px 10px;
+  background: rgba(68, 221, 102, 0.1);
+  border: 1px solid rgba(68, 221, 102, 0.25);
+  border-radius: 4px;
+}
+
 /* ─── Controls hint ─── */
 #controls-help {
   position: fixed;
@@ -1309,6 +1327,16 @@ body {
 .mob-btn-cam {
   right: 8px;
   bottom: 104px;
+}
+
+.mob-btn-ils {
+  right: 56px;
+  bottom: 200px;
+}
+
+.mob-btn-assist {
+  right: 56px;
+  bottom: 152px;
 }
 
 /* ─── Pause button ─── */

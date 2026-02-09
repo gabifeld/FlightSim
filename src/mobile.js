@@ -4,6 +4,8 @@ import { aircraftState } from './aircraft.js';
 import { playGearSound, playFlapSound } from './audio.js';
 import { togglePause, isMenuOpen } from './menu.js';
 import { toggleCamera } from './camera.js';
+import { toggleILS } from './hud.js';
+import { toggleLandingAssist, isLandingAssistActive } from './landing.js';
 
 const JOYSTICK_RADIUS = 50; // max drag distance in px
 const SMOOTH_RATE = 12;
@@ -32,7 +34,7 @@ let joyRawY = 0;
 // Button edge detection
 const buttonState = {};
 const prevButtonState = {};
-const BUTTONS = ['gear', 'flaps', 'camera', 'pause', 'yawLeft', 'yawRight'];
+const BUTTONS = ['gear', 'flaps', 'camera', 'pause', 'yawLeft', 'yawRight', 'ils', 'assist'];
 
 function isTouchDevice() {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
@@ -73,6 +75,8 @@ function createOverlay() {
     ['mob-btn mob-btn-action mob-btn-gear', 'gear', 'GR'],
     ['mob-btn mob-btn-action mob-btn-flaps', 'flaps', 'FL'],
     ['mob-btn mob-btn-action mob-btn-cam', 'camera', 'CAM'],
+    ['mob-btn mob-btn-action mob-btn-ils', 'ils', 'ILS'],
+    ['mob-btn mob-btn-action mob-btn-assist', 'assist', 'LND'],
     ['mob-btn mob-btn-pause', 'pause', '\u275A\u275A'],
   ];
   for (const [cls, btnName, label] of btnDefs) {
@@ -237,8 +241,10 @@ function updateToggleVisuals() {
   if (!overlay) return;
   const gearBtn = overlay.querySelector('.mob-btn-gear');
   const flapBtn = overlay.querySelector('.mob-btn-flaps');
+  const assistBtn = overlay.querySelector('.mob-btn-assist');
   if (gearBtn) gearBtn.classList.toggle('mob-btn-on', aircraftState.gear);
   if (flapBtn) flapBtn.classList.toggle('mob-btn-on', aircraftState.flaps);
+  if (assistBtn) assistBtn.classList.toggle('mob-btn-on', isLandingAssistActive());
 }
 
 // ── Exports ──
@@ -269,6 +275,8 @@ export function updateMobile(dt) {
       if (name === 'gear') { aircraftState.gear = !aircraftState.gear; playGearSound(); }
       if (name === 'flaps') { aircraftState.flaps = !aircraftState.flaps; playFlapSound(); }
       if (name === 'camera') toggleCamera();
+      if (name === 'ils') toggleILS();
+      if (name === 'assist') toggleLandingAssist();
       if (name === 'pause') togglePause();
     }
     prevButtonState[name] = cur;

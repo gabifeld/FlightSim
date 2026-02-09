@@ -3,7 +3,7 @@ import { getKeys } from './controls.js';
 import { getWeatherState } from './weather.js';
 import { getAircraftType } from './aircraftTypes.js';
 import { isOnTaxiway, getTaxiwayNetwork } from './taxi.js';
-import { isLandingMode, computeILSGuidance, getScoreData, hasTouchdown } from './landing.js';
+import { isLandingMode, computeILSGuidance, getScoreData, hasTouchdown, isLandingAssistActive } from './landing.js';
 import { isAPEngaged, getAPState } from './autopilot.js';
 import { getGPWSState } from './gpws.js';
 import { getTimeOfDay, isNight } from './scene.js';
@@ -24,6 +24,7 @@ let els = {};
 let minimapCtx = null;
 let minimapZoom = 'local'; // 'local' | 'overview'
 let terrainImage = null; // cached terrain background
+let ilsDismissed = false;
 
 export function initHUD() {
   els = {
@@ -209,6 +210,21 @@ export function updateHUD(flightState) {
   // Autopilot panel
   updateAPPanel();
 
+  // Landing assist indicator
+  let assistEl = document.getElementById('hud-landing-assist');
+  if (isLandingAssistActive()) {
+    if (!assistEl) {
+      assistEl = document.createElement('div');
+      assistEl.id = 'hud-landing-assist';
+      assistEl.className = 'landing-assist-indicator';
+      assistEl.textContent = 'LAND ASSIST';
+      document.getElementById('hud').appendChild(assistEl);
+    }
+    assistEl.style.display = 'block';
+  } else if (assistEl) {
+    assistEl.style.display = 'none';
+  }
+
   // Time display
   if (els.timeDisplay) {
     const tod = getTimeOfDay();
@@ -303,8 +319,21 @@ function updateAPPanel() {
   }
 }
 
+export function toggleILS() {
+  ilsDismissed = !ilsDismissed;
+}
+
+export function isILSVisible() {
+  return !ilsDismissed;
+}
+
 function updateILS(state) {
   if (!els.ilsPanel) return;
+
+  if (ilsDismissed) {
+    els.ilsPanel.style.display = 'none';
+    return;
+  }
 
   // Show ILS when on approach (airborne or in landing mode and not landed)
   const showILS = !state.onGround || (isLandingMode() && !hasTouchdown());

@@ -9,6 +9,8 @@ import {
   isAPEngaged,
 } from './autopilot.js';
 import { cycleWeatherPreset } from './weatherFx.js';
+import { toggleILS } from './hud.js';
+import { toggleLandingAssist } from './landing.js';
 import { cycleCloudDensity } from './terrain.js';
 import { toggleReplay, isReplayPlaying, scrubReplay, setReplaySpeed, getReplayState } from './replay.js';
 import { updateGamepad, getButtonJustPressed, isGamepadConnected } from './gamepad.js';
@@ -24,7 +26,7 @@ const SIM_KEYS = new Set([
   'w', 's', 'a', 'd', 'q', 'e', 'g', 'f', 'b', 'v', 'r', ' ',
   '1', '2', '3', '4',
   'l', 't', 'p', 'c', 'z', 'h', 'j', 'n', 'm', '=',
-  '[', ']', '+', '-',
+  '[', ']', '+', '-', 'i', 'k',
 ]);
 
 const AIRCRAFT_MAP = {
@@ -140,6 +142,16 @@ export function initControls() {
       // Cloud density cycle
       if (mapped === 'c') {
         cycleCloudDensity();
+      }
+
+      // ILS toggle
+      if (mapped === 'i') {
+        toggleILS();
+      }
+
+      // Landing assist
+      if (mapped === 'k') {
+        toggleLandingAssist();
       }
 
       // Replay controls

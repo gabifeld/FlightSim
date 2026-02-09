@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { aircraftState } from './aircraft.js';
 import { RUNWAY_LENGTH, RUNWAY_WIDTH, MS_TO_KNOTS, MS_TO_FPM } from './constants.js';
 import { saveBestScore, getBestScore } from './settings.js';
+import { clamp } from './utils.js';
 
 // Runway threshold (south end - approach heading north)
 const THRESHOLD_Z = -RUNWAY_LENGTH / 2;
@@ -38,6 +39,10 @@ let currentConfigName = null;
 let touchdownRecorded = false;
 let scoreData = null;
 let scoreCallback = null;
+
+// ── Landing Assist ──
+let landingAssistActive = false;
+let assistPitchIntegral = 0;
 
 export function isLandingMode() {
   return landingModeActive;
@@ -199,6 +204,76 @@ export function recordTouchdown(vs, groundSpeed) {
   if (scoreCallback) scoreCallback(scoreData);
 
   return scoreData;
+}
+
+// ── Landing Assist ──
+
+export function toggleLandingAssist() {
+  landingAssistActive = !landingAssistActive;
+  assistPitchIntegral = 0;
+}
+
+export function isLandingAssistActive() {
+  return landingAssistActive;
+}
+
+export function disableLandingAssist() {
+  landingAssistActive = false;
+  assistPitchIntegral = 0;
+}
+
+/**
+ * Landing assist: auto-manages pitch and throttle to follow the glideslope.
+ * Player only steers left/right. Returns { pitchCommand, throttleCommand } or null.
+ */
+export function updateLandingAssist(dt) {
+  if (!landingAssistActive) return null;
+
+  const state = aircraftState;
+
+  // Auto-disable on ground
+  if (state.onGround) {
+    disableLandingAssist();
+    return null;
+  }
+
+  const ils = computeILSGuidance(state);
+  if (!ils || ils.pastThreshold) {
+    // Past the runway — cut assist, let player flare
+    disableLandingAssist();
+    return null;
+  }
+
+  const takeoffSpd = state.config ? state.config.takeoffSpeed : 55;
+  const vrefSpeed = takeoffSpd * 0.72; // target approach speed
+
+  // Glideslope: compute desired VS from GS deviation
+  // Target: 3-degree glideslope = ~-700 fpm at typical approach speed
+  const targetVsFpm = -Math.tan(GLIDESLOPE_RAD) * (state.speed * MS_TO_FPM / MS_TO_KNOTS) * 60;
+  const currentVsFpm = state.verticalSpeed * MS_TO_FPM;
+
+  // GS correction — steer VS toward glideslope
+  const gsCorrection = ils.gsDots * 200; // +dots = above, need more negative VS
+  const desiredVs = targetVsFpm - gsCorrection;
+  const vsError = desiredVs - currentVsFpm;
+
+  // Simple PI for pitch
+  assistPitchIntegral += vsError * dt;
+  assistPitchIntegral = clamp(assistPitchIntegral, -500, 500);
+
+  const pitchCommand = clamp(
+    vsError * 0.002 + assistPitchIntegral * 0.0003,
+    -0.6, 0.6
+  );
+
+  // Auto-throttle: hold approach speed
+  const speedError = vrefSpeed - state.speed;
+  const throttleCommand = clamp(
+    0.2 + speedError * 0.08,
+    0.0, 0.7
+  );
+
+  return { pitchCommand, throttleCommand };
 }
 
 export function getScoreData() {

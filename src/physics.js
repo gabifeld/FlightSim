@@ -6,6 +6,7 @@ import { getWeatherState } from './weather.js';
 import { clamp } from './utils.js';
 import { getGamepadState, isGamepadConnected } from './gamepad.js';
 import { getMobileState, isMobileActive } from './mobile.js';
+import { isLandingAssistActive, updateLandingAssist } from './landing.js';
 import { isAPEngaged, getAPState, updateAutopilot } from './autopilot.js';
 import {
   GRAVITY,
@@ -120,6 +121,15 @@ export function updatePhysics(dt) {
     yawInput = clamp(yawInput + mob.yawInput, -1, 1);
     if (mob.throttleInput >= 0) {
       state.throttle = clamp(mob.throttleInput, 0, 1);
+    }
+  }
+
+  // Landing assist (auto pitch/throttle on glideslope, player steers)
+  if (isLandingAssistActive()) {
+    const assist = updateLandingAssist(dt);
+    if (assist) {
+      pitchInput = assist.pitchCommand;
+      state.throttle = assist.throttleCommand;
     }
   }
 
