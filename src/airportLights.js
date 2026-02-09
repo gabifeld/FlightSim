@@ -1,4 +1,4 @@
-// Night runway/taxiway lighting with InstancedMesh + light pooling
+// Night runway/taxiway lighting with InstancedMesh + light pooling + Points glow
 import * as THREE from 'three';
 import { RUNWAY_LENGTH, RUNWAY_WIDTH, AIRPORT2_X, AIRPORT2_Z } from './constants.js';
 import { aircraftState } from './aircraft.js';
@@ -14,7 +14,10 @@ let papiLights = [];         // PAPI fixtures with angle-dependent color
 let nightMode = false;
 let sceneRef = null;
 
-const POOL_SIZE = 32;
+// Points-based glow system (cheap, visible from far away)
+let glowPoints = null;       // THREE.Points for far-away visibility
+
+const POOL_SIZE = 12;        // Reduced from 32 — PointLights are expensive
 const EDGE_SPACING = 60;
 
 // Cached sort state - avoid sorting every frame
@@ -163,6 +166,53 @@ function addAirportFixtures(scene, fixtureGeo, dummy, ox, oz) {
   }
 }
 
+// Build a Points system from all fixture positions for cheap far-away glow
+function buildGlowPoints(scene) {
+  const count = fixturePositions.length;
+  const positions = new Float32Array(count * 3);
+  const colors = new Float32Array(count * 3);
+
+  const colorMap = {
+    edge: new THREE.Color(0xffeedd),
+    threshold_green: new THREE.Color(0x00ff44),
+    threshold_red: new THREE.Color(0xff2200),
+    taxi_blue: new THREE.Color(0x4466ff),
+    als: new THREE.Color(0xffffff),
+    papi: new THREE.Color(0xff3300),
+  };
+
+  for (let i = 0; i < count; i++) {
+    const f = fixturePositions[i];
+    positions[i * 3] = f.x;
+    positions[i * 3 + 1] = f.y + 0.5;
+    positions[i * 3 + 2] = f.z;
+
+    const c = colorMap[f.type] || colorMap.edge;
+    colors[i * 3] = c.r;
+    colors[i * 3 + 1] = c.g;
+    colors[i * 3 + 2] = c.b;
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+  const mat = new THREE.PointsMaterial({
+    size: 8,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
+  glowPoints = new THREE.Points(geo, mat);
+  glowPoints.frustumCulled = false;
+  glowPoints.visible = false;
+  scene.add(glowPoints);
+}
+
 export function initAirportLights(scene) {
   sceneRef = scene;
 
@@ -175,9 +225,12 @@ export function initAirportLights(scene) {
   // Airport 2
   addAirportFixtures(scene, fixtureGeo, dummy, AIRPORT2_X, AIRPORT2_Z);
 
-  // --- Light pool (reusable PointLights) ---
+  // Build glow sprite system from all fixtures
+  buildGlowPoints(scene);
+
+  // --- Light pool (reusable PointLights) — reduced pool for performance ---
   for (let i = 0; i < POOL_SIZE; i++) {
-    const light = new THREE.PointLight(0xffeedd, 0, 300);
+    const light = new THREE.PointLight(0xffeedd, 0, 120);
     light.visible = false;
     scene.add(light);
     lightPool.push(light);
@@ -192,6 +245,9 @@ export function updateAirportLights(dt) {
   if (!sceneRef) return;
 
   const time = performance.now() * 0.001;
+
+  // Toggle glow points visibility
+  if (glowPoints) glowPoints.visible = nightMode;
 
   // ALS rabbit strobe animation (sequenced flash far->near)
   if (nightMode) {
@@ -236,9 +292,8 @@ export function updateAirportLights(dt) {
       lastSortX = ax;
       lastSortZ = az;
 
-      // In-place distance computation + partial sort (only need top POOL_SIZE)
-      // Use a simple selection approach instead of full sort
-      const maxDistSq = 1500 * 1500;
+      // Filter nearby fixtures then partial sort
+      const maxDistSq = 500 * 500; // Reduced search radius — PointLights only for nearby ground glow
       const candidates = [];
       for (let i = 0; i < fixturePositions.length; i++) {
         const f = fixturePositions[i];
@@ -257,8 +312,8 @@ export function updateAirportLights(dt) {
         const f = fixturePositions[sortedCache[i].idx];
         light.position.set(f.x, f.y + 1, f.z);
         light.visible = true;
-        light.intensity = 12;
-        light.distance = 300;
+        light.intensity = 5;
+        light.distance = 120;
 
         // Color based on type
         if (f.type === 'threshold_green') light.color.setHex(0x00ff44);
