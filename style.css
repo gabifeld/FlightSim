@@ -1162,7 +1162,6 @@ body {
   display: none;
 }
 
-/* Show only on touch devices */
 @media (pointer: coarse) {
   #mobile-controls { display: block; }
 }
@@ -1174,15 +1173,13 @@ body {
 /* ─── Throttle Slider ─── */
 .mob-throttle-track {
   position: absolute;
-  left: 12px;
-  bottom: 100px;
-  width: 44px;
-  height: 200px;
-  background: rgba(8, 12, 20, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  left: 8px;
+  bottom: 60px;
+  width: 32px;
+  height: 150px;
+  background: rgba(8, 12, 20, 0.5);
   border: 1px solid rgba(120, 180, 255, 0.15);
-  border-radius: 22px;
+  border-radius: 16px;
   pointer-events: auto;
   touch-action: none;
   overflow: hidden;
@@ -1194,8 +1191,8 @@ body {
   left: 0;
   width: 100%;
   height: 0%;
-  background: linear-gradient(to top, rgba(50, 130, 255, 0.35), rgba(80, 200, 255, 0.2));
-  border-radius: 0 0 22px 22px;
+  background: linear-gradient(to top, rgba(50, 130, 255, 0.4), rgba(80, 200, 255, 0.15));
+  border-radius: 0 0 16px 16px;
   transition: height 0.05s linear;
 }
 
@@ -1204,24 +1201,39 @@ body {
   bottom: 0%;
   left: 50%;
   transform: translate(-50%, 50%);
-  width: 36px;
-  height: 14px;
+  width: 26px;
+  height: 10px;
   background: rgba(80, 180, 255, 0.7);
-  border-radius: 7px;
-  box-shadow: 0 0 10px rgba(80, 180, 255, 0.4);
+  border-radius: 5px;
+  box-shadow: 0 0 8px rgba(80, 180, 255, 0.4);
   transition: bottom 0.05s linear;
 }
 
-.mob-throttle-label {
+/* ─── Virtual Joystick ─── */
+.mob-joy-base {
   position: absolute;
-  top: 6px;
+  right: 60px;
+  bottom: 50px;
+  width: 110px;
+  height: 110px;
+  border-radius: 50%;
+  background: rgba(8, 12, 20, 0.35);
+  border: 1px solid rgba(120, 180, 255, 0.12);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.mob-joy-knob {
+  position: absolute;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%);
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 1.5px;
-  color: rgba(160, 200, 255, 0.45);
+  transform: translate(-50%, -50%);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: rgba(80, 180, 255, 0.35);
+  border: 1px solid rgba(120, 180, 255, 0.3);
+  box-shadow: 0 0 10px rgba(80, 160, 255, 0.2);
 }
 
 /* ─── Buttons (base) ─── */
@@ -1230,323 +1242,199 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 52px;
-  height: 52px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
-  background: rgba(8, 12, 20, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  background: rgba(8, 12, 20, 0.5);
   border: 1px solid rgba(120, 180, 255, 0.18);
-  color: rgba(200, 220, 255, 0.7);
+  color: rgba(200, 220, 255, 0.65);
   font-family: 'JetBrains Mono', monospace;
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 700;
-  letter-spacing: 1px;
+  letter-spacing: 0.5px;
   pointer-events: auto;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+  transition: background 0.12s, border-color 0.12s;
 }
 
 .mob-btn-held {
-  background: rgba(40, 80, 160, 0.45);
+  background: rgba(40, 80, 160, 0.5);
   border-color: rgba(120, 180, 255, 0.4);
-  box-shadow: 0 0 12px rgba(80, 160, 255, 0.3);
 }
 
 .mob-btn-on {
-  background: rgba(30, 100, 50, 0.45);
+  background: rgba(30, 100, 50, 0.5);
   border-color: rgba(68, 221, 102, 0.35);
   color: #44dd66;
-  box-shadow: 0 0 8px rgba(68, 221, 102, 0.2);
 }
 
 /* ─── Brake ─── */
 .mob-btn-brake {
-  left: 68px;
-  bottom: 100px;
+  left: 50px;
+  bottom: 60px;
 }
 
 .mob-btn-brake.mob-btn-held {
-  background: rgba(180, 40, 30, 0.45);
+  background: rgba(180, 40, 30, 0.5);
   border-color: rgba(255, 100, 80, 0.4);
   color: #ff7766;
-  box-shadow: 0 0 12px rgba(255, 80, 60, 0.3);
 }
 
 /* ─── Yaw buttons ─── */
 .mob-btn-yaw-left {
-  left: 68px;
-  bottom: 38px;
-  font-size: 18px;
+  left: 50px;
+  bottom: 14px;
+  font-size: 14px;
 }
 
 .mob-btn-yaw-right {
-  right: 68px;
-  bottom: 38px;
-  font-size: 18px;
+  right: 14px;
+  bottom: 14px;
+  font-size: 14px;
 }
 
 /* ─── Right-side action buttons ─── */
-.mob-btn-cam {
-  right: 12px;
-  bottom: 280px;
-}
-
 .mob-btn-gear {
-  right: 12px;
-  bottom: 220px;
+  right: 8px;
+  bottom: 200px;
 }
 
 .mob-btn-flaps {
-  right: 12px;
-  bottom: 160px;
+  right: 8px;
+  bottom: 152px;
+}
+
+.mob-btn-cam {
+  right: 8px;
+  bottom: 104px;
 }
 
 /* ─── Pause button ─── */
 .mob-btn-pause {
-  right: 12px;
-  top: 12px;
-  width: 44px;
-  height: 44px;
-  font-size: 12px;
-  border-radius: 10px;
-}
-
-/* ─── Tilt Permission Prompt (iOS) ─── */
-.mob-tilt-prompt {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  padding: 18px 32px;
-  background: rgba(8, 12, 20, 0.8);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(120, 180, 255, 0.25);
-  border-radius: 12px;
-  font-family: 'Inter', sans-serif;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  color: #55ccff;
-  text-shadow: 0 0 12px rgba(80, 200, 255, 0.3);
-  pointer-events: auto;
-  touch-action: none;
-  display: none;
-}
-
-/* ─── Calibration Feedback ─── */
-.mob-calibration-msg {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  padding: 12px 24px;
-  background: rgba(30, 100, 50, 0.7);
-  border: 1px solid rgba(68, 221, 102, 0.4);
+  right: 8px;
+  top: 8px;
+  width: 34px;
+  height: 34px;
+  font-size: 10px;
   border-radius: 8px;
-  font-family: 'Inter', sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 2px;
-  color: #44dd66;
-  pointer-events: none;
-  animation: mob-fade-out 1.2s ease-out forwards;
-}
-
-@keyframes mob-fade-out {
-  0% { opacity: 1; }
-  70% { opacity: 1; }
-  100% { opacity: 0; }
 }
 
 /* ═══════════════════════════════════════════
-   RESPONSIVE HUD — TABLET (max-width: 768px)
+   RESPONSIVE HUD — TOUCH DEVICES
    ═══════════════════════════════════════════ */
 
-@media (max-width: 768px) {
-  /* Shrink PFD tape values */
-  .tape-value {
-    font-size: 18px;
-  }
+@media (pointer: coarse) {
+  /* Hide elements that overlap with touch controls */
+  #controls-help { display: none; }
+  #minimap-panel { display: none; }
 
-  .tape-value-sm {
-    font-size: 14px;
-  }
-
-  .tape-label {
-    font-size: 8px;
-  }
-
-  .tape-unit {
-    font-size: 7px;
-  }
-
-  .pfd-tape {
-    padding: 0 8px;
-    min-width: 50px;
-  }
-
-  #pfd {
-    left: 12px;
-    bottom: 12px;
-    padding: 10px 12px;
-  }
+  /* Systems panel: hide on mobile — info duplicated by touch buttons */
+  #systems { display: none; }
 
   /* Shrink attitude indicator */
   #attitude-indicator {
-    width: 90px;
-    height: 90px;
+    width: 80px;
+    height: 80px;
   }
 
   #attitude-panel {
-    top: 12px;
-    padding: 6px;
+    top: 8px;
+    padding: 5px;
   }
 
-  /* Shrink minimap */
-  #minimap-canvas {
-    width: 120px;
-    height: 120px;
-  }
-
-  #minimap-panel {
-    top: 12px;
-    right: 12px;
-    padding: 6px;
-  }
-
-  /* Hide controls help on mobile */
-  #controls-help {
-    display: none;
-  }
-
-  /* Compact systems panel */
-  #systems {
-    right: 12px;
-    bottom: 12px;
-    min-width: 130px;
-    padding: 10px 12px;
-  }
-
-  .sys-row {
-    margin-bottom: 6px;
-    gap: 6px;
-  }
-
-  .sys-label {
-    font-size: 8px;
-    min-width: 34px;
-  }
-
-  .sys-status {
-    font-size: 11px;
-  }
-
-  .sys-pct {
-    font-size: 11px;
-  }
-
-  /* Compact AP panel */
-  #ap-panel {
-    top: 120px;
-    padding: 6px 10px;
-  }
-
-  .ap-label {
-    font-size: 8px;
-  }
-
-  .ap-mode {
-    font-size: 9px;
-    padding: 1px 4px;
-  }
-
-  .ap-target {
-    font-size: 8px;
-  }
-
-  /* State bar */
-  #state-bar {
-    bottom: 12px;
-  }
-
-  .state-label {
-    font-size: 9px;
-    letter-spacing: 2px;
-  }
-
-  .state-message {
-    font-size: 14px;
-  }
-
-  /* Stall / GPWS warnings */
-  .stall-warning {
-    font-size: 32px;
-    letter-spacing: 6px;
-  }
-
-  .gpws-warning {
-    font-size: 24px;
-  }
-
-  /* Aircraft name / time */
-  .aircraft-name-display {
-    font-size: 10px;
-    top: 14px;
-    left: 14px;
-  }
-
-  .time-display {
-    font-size: 9px;
-    top: 28px;
-    left: 14px;
-  }
-}
-
-/* ═══════════════════════════════════════════
-   RESPONSIVE HUD — PHONE (max-width: 480px)
-   ═══════════════════════════════════════════ */
-
-@media (max-width: 480px) {
-  /* Hide minimap on very small screens */
-  #minimap-panel {
-    display: none;
-  }
-
-  /* Further compact PFD — hide AoA and G-force tapes */
-  .pfd-tape:nth-child(n+9) {
-    display: none;
-  }
-
-  .pfd-divider:nth-child(n+8) {
-    display: none;
-  }
-
-  .tape-value {
-    font-size: 16px;
-  }
+  /* Compact PFD — only show speed, alt, heading */
+  .tape-value { font-size: 16px; }
+  .tape-value-sm { font-size: 12px; }
+  .tape-label { font-size: 7px; }
+  .tape-unit { font-size: 6px; }
 
   .pfd-tape {
     padding: 0 6px;
-    min-width: 42px;
+    min-width: 40px;
   }
+
+  /* Hide AoA and G-force tapes */
+  .pfd-tape:nth-child(n+9) { display: none; }
+  .pfd-divider:nth-child(n+8) { display: none; }
 
   #pfd {
-    padding: 8px 8px;
+    left: 8px;
+    bottom: 8px;
+    padding: 6px 8px;
+    border-radius: 8px;
   }
 
-  /* Even smaller attitude indicator */
-  #attitude-indicator {
-    width: 70px;
-    height: 70px;
+  /* AP panel compact */
+  #ap-panel {
+    top: 105px;
+    padding: 4px 8px;
   }
 
-  /* Smaller systems panel */
-  #systems {
-    min-width: 110px;
-    padding: 8px 10px;
+  .ap-label { font-size: 7px; }
+  .ap-mode { font-size: 8px; padding: 1px 3px; }
+  .ap-target { font-size: 7px; }
+
+  /* State bar */
+  #state-bar { bottom: 8px; }
+  .state-label { font-size: 8px; letter-spacing: 2px; }
+  .state-message { font-size: 12px; }
+
+  /* Stall / GPWS warnings */
+  .stall-warning { font-size: 28px; letter-spacing: 4px; }
+  .gpws-warning { font-size: 20px; }
+
+  /* Aircraft name / time */
+  .aircraft-name-display { font-size: 9px; top: 8px; left: 10px; }
+  .time-display { font-size: 8px; top: 20px; left: 10px; }
+
+  /* ILS panel smaller */
+  #ils-panel { margin-bottom: 50px; padding: 6px 8px; }
+  .ils-crosshair { width: 80px; height: 80px; }
+  .ils-dme { font-size: 11px; }
+
+  /* Landing score panel */
+  #landing-score-panel { padding: 16px 20px; min-width: 200px; }
+  .score-grade { font-size: 40px; }
+  .score-total { font-size: 14px; }
+}
+
+/* ─── Extra small phones (landscape height) ─── */
+@media (pointer: coarse) and (max-height: 420px) {
+  .mob-throttle-track {
+    height: 110px;
+    bottom: 50px;
   }
+
+  .mob-joy-base {
+    width: 90px;
+    height: 90px;
+    bottom: 40px;
+    right: 50px;
+  }
+
+  .mob-joy-knob {
+    width: 34px;
+    height: 34px;
+  }
+
+  .mob-btn {
+    width: 34px;
+    height: 34px;
+    font-size: 8px;
+  }
+
+  .mob-btn-gear { bottom: 160px; }
+  .mob-btn-flaps { bottom: 120px; }
+  .mob-btn-cam { bottom: 80px; }
+
+  #attitude-panel { display: none; }
+  #pfd { padding: 4px 6px; }
+  .tape-value { font-size: 14px; }
+  .pfd-tape { min-width: 34px; padding: 0 4px; }
+
+  /* Hide VS tape on very small screens */
+  .pfd-tape:nth-child(n+5) { display: none; }
+  .pfd-divider:nth-child(n+4) { display: none; }
 }

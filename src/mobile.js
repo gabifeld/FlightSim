@@ -1,91 +1,44 @@
-// Mobile touch & tilt controls — mirrors gamepad.js pattern
+// Mobile touch controls — virtual joystick + buttons (no tilt)
 
 import { aircraftState } from './aircraft.js';
 import { playGearSound, playFlapSound } from './audio.js';
 import { togglePause, isMenuOpen } from './menu.js';
 import { toggleCamera } from './camera.js';
 
-const TILT_DEADZONE = 8;   // degrees
-const TILT_MAX = 35;       // degrees for full deflection
-const SMOOTH_RATE = 8;     // how fast inputs smooth (higher = snappier)
+const JOYSTICK_RADIUS = 50; // max drag distance in px
+const SMOOTH_RATE = 12;
 
 const state = {
   active: false,
   pitchInput: 0,
   rollInput: 0,
   yawInput: 0,
-  throttleInput: -1,  // -1 = not controlling
+  throttleInput: -1,
   brakeActive: false,
 };
 
 let overlay = null;
-let calibrationBeta = 0;
-let calibrationGamma = 0;
-let tiltPermissionGranted = false;
-let rawPitch = 0;
-let rawRoll = 0;
-let throttleValue = 0.0; // 0-1
+let throttleValue = 0.0;
+
+// Joystick state
+let joyBase = null;
+let joyKnob = null;
+let joyTouchId = null;
+let joyOriginX = 0;
+let joyOriginY = 0;
+let joyRawX = 0;
+let joyRawY = 0;
 
 // Button edge detection
 const buttonState = {};
 const prevButtonState = {};
 const BUTTONS = ['gear', 'flaps', 'camera', 'pause', 'yawLeft', 'yawRight'];
 
-// ── Detection ──
-
 function isTouchDevice() {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
-// ── Tilt processing ──
-
-function applyTiltDeadzone(value) {
-  if (Math.abs(value) < TILT_DEADZONE) return 0;
-  const sign = value > 0 ? 1 : -1;
-  const magnitude = (Math.abs(value) - TILT_DEADZONE) / (TILT_MAX - TILT_DEADZONE);
-  return sign * Math.min(magnitude, 1);
-}
-
-function onDeviceOrientation(e) {
-  if (e.beta === null || e.gamma === null) return;
-  rawPitch = (e.beta - calibrationBeta);   // front-back
-  rawRoll = (e.gamma - calibrationGamma);  // left-right
-}
-
-function calibrateTilt() {
-  calibrationBeta = rawPitch + calibrationBeta;
-  calibrationGamma = rawRoll + calibrationGamma;
-  rawPitch = 0;
-  rawRoll = 0;
-}
-
-async function requestTiltPermission() {
-  if (tiltPermissionGranted) return;
-
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    // iOS 13+
-    try {
-      const response = await DeviceOrientationEvent.requestPermission();
-      if (response === 'granted') {
-        tiltPermissionGranted = true;
-        window.addEventListener('deviceorientation', onDeviceOrientation);
-        calibrateTilt();
-        hideTiltPrompt();
-      }
-    } catch {
-      // Permission denied
-    }
-  } else {
-    // Android / non-iOS — just listen
-    tiltPermissionGranted = true;
-    window.addEventListener('deviceorientation', onDeviceOrientation);
-    setTimeout(calibrateTilt, 500);
-    hideTiltPrompt();
-  }
-}
-
-// ── Touch overlay DOM ──
+// ── DOM helper ──
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -94,26 +47,33 @@ function el(tag, className, text) {
   return node;
 }
 
+// ── Overlay ──
+
 function createOverlay() {
   overlay = document.createElement('div');
   overlay.id = 'mobile-controls';
 
-  // Throttle slider
+  // Throttle slider (left)
   const thrTrack = el('div', 'mob-throttle-track');
   thrTrack.appendChild(el('div', 'mob-throttle-fill'));
   thrTrack.appendChild(el('div', 'mob-throttle-knob'));
-  thrTrack.appendChild(el('div', 'mob-throttle-label', 'THR'));
   overlay.appendChild(thrTrack);
+
+  // Virtual joystick zone (right side)
+  joyBase = el('div', 'mob-joy-base');
+  joyKnob = el('div', 'mob-joy-knob');
+  joyBase.appendChild(joyKnob);
+  overlay.appendChild(joyBase);
 
   // Buttons
   const btnDefs = [
     ['mob-btn mob-btn-brake', 'brake', 'BRK'],
-    ['mob-btn mob-btn-yaw-left', 'yawLeft', '\u2190'],
-    ['mob-btn mob-btn-yaw-right', 'yawRight', '\u2192'],
+    ['mob-btn mob-btn-yaw-left', 'yawLeft', '\u25C0'],
+    ['mob-btn mob-btn-yaw-right', 'yawRight', '\u25B6'],
+    ['mob-btn mob-btn-action mob-btn-gear', 'gear', 'GR'],
+    ['mob-btn mob-btn-action mob-btn-flaps', 'flaps', 'FL'],
     ['mob-btn mob-btn-action mob-btn-cam', 'camera', 'CAM'],
-    ['mob-btn mob-btn-action mob-btn-gear', 'gear', 'GEAR'],
-    ['mob-btn mob-btn-action mob-btn-flaps', 'flaps', 'FLAP'],
-    ['mob-btn mob-btn-pause', 'pause', '| |'],
+    ['mob-btn mob-btn-pause', 'pause', '\u275A\u275A'],
   ];
   for (const [cls, btnName, label] of btnDefs) {
     const b = el('div', cls, label);
@@ -121,17 +81,14 @@ function createOverlay() {
     overlay.appendChild(b);
   }
 
-  // Tilt prompt (iOS)
-  const prompt = el('div', 'mob-tilt-prompt', 'TAP TO ENABLE TILT CONTROLS');
-  overlay.appendChild(prompt);
-
   document.body.appendChild(overlay);
 
   setupThrottleSlider();
+  setupJoystick();
   setupButtons();
-  setupTiltPrompt();
-  setupDoubleTapCalibrate();
 }
+
+// ── Throttle slider ──
 
 function setupThrottleSlider() {
   const track = overlay.querySelector('.mob-throttle-track');
@@ -140,7 +97,7 @@ function setupThrottleSlider() {
   let dragging = false;
   let trackRect = null;
 
-  function updateThrottleVisual() {
+  function updateVisual() {
     const pct = throttleValue * 100;
     knob.style.bottom = pct + '%';
     fill.style.height = pct + '%';
@@ -149,10 +106,9 @@ function setupThrottleSlider() {
   function handleMove(clientY) {
     if (!trackRect) trackRect = track.getBoundingClientRect();
     const y = trackRect.bottom - clientY;
-    const ratio = Math.max(0, Math.min(1, y / trackRect.height));
-    throttleValue = ratio;
-    state.throttleInput = ratio;
-    updateThrottleVisual();
+    throttleValue = Math.max(0, Math.min(1, y / trackRect.height));
+    state.throttleInput = throttleValue;
+    updateVisual();
   }
 
   track.addEventListener('touchstart', (e) => {
@@ -171,27 +127,79 @@ function setupThrottleSlider() {
 
   window.addEventListener('touchend', (e) => {
     if (!dragging) return;
-    let stillTouching = false;
+    let still = false;
     for (let i = 0; i < e.touches.length; i++) {
       if (trackRect) {
         const t = e.touches[i];
         if (t.clientX >= trackRect.left - 20 && t.clientX <= trackRect.right + 20) {
-          stillTouching = true;
+          still = true;
         }
       }
     }
-    if (!stillTouching) {
-      dragging = false;
-      trackRect = null;
-    }
+    if (!still) { dragging = false; trackRect = null; }
   });
 
-  updateThrottleVisual();
+  updateVisual();
 }
 
-function setupButtons() {
-  const holdButtons = ['brake', 'yawLeft', 'yawRight'];
+// ── Virtual joystick ──
 
+function setupJoystick() {
+  const zone = joyBase;
+
+  zone.addEventListener('touchstart', (e) => {
+    e.preventDefault();
+    if (joyTouchId !== null) return;
+    const t = e.changedTouches[0];
+    joyTouchId = t.identifier;
+    const rect = zone.getBoundingClientRect();
+    joyOriginX = rect.left + rect.width / 2;
+    joyOriginY = rect.top + rect.height / 2;
+    updateJoystickFromTouch(t);
+  }, { passive: false });
+
+  window.addEventListener('touchmove', (e) => {
+    if (joyTouchId === null) return;
+    for (let i = 0; i < e.touches.length; i++) {
+      if (e.touches[i].identifier === joyTouchId) {
+        updateJoystickFromTouch(e.touches[i]);
+        return;
+      }
+    }
+  }, { passive: true });
+
+  const endJoy = (e) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      if (e.changedTouches[i].identifier === joyTouchId) {
+        joyTouchId = null;
+        joyRawX = 0;
+        joyRawY = 0;
+        joyKnob.style.transform = 'translate(-50%, -50%)';
+        return;
+      }
+    }
+  };
+  window.addEventListener('touchend', endJoy);
+  window.addEventListener('touchcancel', endJoy);
+}
+
+function updateJoystickFromTouch(touch) {
+  let dx = touch.clientX - joyOriginX;
+  let dy = touch.clientY - joyOriginY;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  if (dist > JOYSTICK_RADIUS) {
+    dx = dx / dist * JOYSTICK_RADIUS;
+    dy = dy / dist * JOYSTICK_RADIUS;
+  }
+  joyRawX = dx / JOYSTICK_RADIUS;  // -1 to 1 (roll)
+  joyRawY = dy / JOYSTICK_RADIUS;  // -1 to 1 (pitch: down = pull up)
+
+  joyKnob.style.transform = `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`;
+}
+
+// ── Buttons ──
+
+function setupButtons() {
   overlay.querySelectorAll('.mob-btn').forEach((btn) => {
     const name = btn.dataset.btn;
     if (!name) return;
@@ -200,7 +208,6 @@ function setupButtons() {
       e.preventDefault();
       buttonState[name] = true;
       btn.classList.add('mob-btn-held');
-
       if (name === 'brake') state.brakeActive = true;
       if (name === 'yawLeft') state.yawInput = -1;
       if (name === 'yawRight') state.yawInput = 1;
@@ -210,7 +217,6 @@ function setupButtons() {
       e.preventDefault();
       buttonState[name] = false;
       btn.classList.remove('mob-btn-held');
-
       if (name === 'brake') state.brakeActive = false;
       if (name === 'yawLeft') state.yawInput = 0;
       if (name === 'yawRight') state.yawInput = 0;
@@ -225,61 +231,7 @@ function setupButtons() {
   });
 }
 
-function setupTiltPrompt() {
-  const prompt = overlay.querySelector('.mob-tilt-prompt');
-  if (!prompt) return;
-
-  if (typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    // iOS: must use 'click' — it's the only event type iOS counts as
-    // a user activation for DeviceOrientationEvent.requestPermission()
-    prompt.style.display = 'block';
-    prompt.addEventListener('click', () => {
-      requestTiltPermission();
-    });
-  } else {
-    // Android / desktop: no permission needed, auto-enable
-    prompt.style.display = 'none';
-    requestTiltPermission();
-  }
-}
-
-// Show the tilt prompt after menu closes (so it's not hidden behind the overlay)
-export function showTiltPromptIfNeeded() {
-  if (!overlay || tiltPermissionGranted) return;
-  const prompt = overlay.querySelector('.mob-tilt-prompt');
-  if (prompt && typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function') {
-    prompt.style.display = 'block';
-  }
-}
-
-function hideTiltPrompt() {
-  if (!overlay) return;
-  const prompt = overlay.querySelector('.mob-tilt-prompt');
-  if (prompt) prompt.style.display = 'none';
-}
-
-function setupDoubleTapCalibrate() {
-  let lastTap = 0;
-  overlay.addEventListener('touchstart', (e) => {
-    if (e.target !== overlay) return;
-    const now = Date.now();
-    if (now - lastTap < 300) {
-      calibrateTilt();
-      showCalibrationFeedback();
-    }
-    lastTap = now;
-  });
-}
-
-function showCalibrationFeedback() {
-  const fb = el('div', 'mob-calibration-msg', 'TILT CALIBRATED');
-  overlay.appendChild(fb);
-  setTimeout(() => fb.remove(), 1200);
-}
-
-// ── Toggle state visual update ──
+// ── Toggle visuals ──
 
 function updateToggleVisuals() {
   if (!overlay) return;
@@ -300,38 +252,24 @@ export function initMobile() {
 export function updateMobile(dt) {
   if (!state.active) return;
 
-  // Hide controls when menu is open so they don't intercept taps
   if (overlay) {
     overlay.classList.toggle('mob-hidden', isMenuOpen());
   }
 
-  // Smooth tilt to state
-  const targetPitch = applyTiltDeadzone(rawPitch);
-  const targetRoll = applyTiltDeadzone(rawRoll);
+  // Smooth joystick → state
   const s = Math.min(1, SMOOTH_RATE * dt);
-  state.pitchInput += (targetPitch - state.pitchInput) * s;
-  state.rollInput += (targetRoll - state.rollInput) * s;
+  state.pitchInput += (joyRawY - state.pitchInput) * s;
+  state.rollInput += (joyRawX - state.rollInput) * s;
 
   // Edge-detect toggle buttons
   for (const name of BUTTONS) {
     const cur = !!buttonState[name];
     const prev = !!prevButtonState[name];
-
     if (cur && !prev) {
-      if (name === 'gear') {
-        aircraftState.gear = !aircraftState.gear;
-        playGearSound();
-      }
-      if (name === 'flaps') {
-        aircraftState.flaps = !aircraftState.flaps;
-        playFlapSound();
-      }
-      if (name === 'camera') {
-        toggleCamera();
-      }
-      if (name === 'pause') {
-        togglePause();
-      }
+      if (name === 'gear') { aircraftState.gear = !aircraftState.gear; playGearSound(); }
+      if (name === 'flaps') { aircraftState.flaps = !aircraftState.flaps; playFlapSound(); }
+      if (name === 'camera') toggleCamera();
+      if (name === 'pause') togglePause();
     }
     prevButtonState[name] = cur;
   }
@@ -339,14 +277,8 @@ export function updateMobile(dt) {
   updateToggleVisuals();
 }
 
-export function getMobileState() {
-  return state;
-}
-
-export function isMobileActive() {
-  return state.active;
-}
-
+export function getMobileState() { return state; }
+export function isMobileActive() { return state.active; }
 export function getMobileButtonJustPressed(name) {
   return !!buttonState[name] && !prevButtonState[name];
 }
