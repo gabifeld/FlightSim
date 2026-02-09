@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Flight Simulator</title>
+    <link rel="stylesheet" href="/style.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <div id="app"></div>
+
+    <!-- Menu System -->
+    <div id="menu-overlay" class="menu-overlay">
+      <!-- Main Menu -->
+      <div id="main-menu" class="menu-panel">
+        <div class="menu-title-group">
+          <div class="menu-title">FLIGHT</div>
+          <div class="menu-title menu-title-accent">SIMULATOR</div>
+        </div>
+        <div class="menu-subtitle">REALISTIC 3D FLIGHT EXPERIENCE</div>
+        <div class="menu-buttons">
+          <div class="menu-btn menu-btn-primary" id="menu-fly">
+            <span class="menu-btn-icon">&#9992;</span> FLY
+          </div>
+          <div class="menu-btn" id="menu-main-settings">SETTINGS</div>
+          <div class="menu-btn" id="menu-main-controls">CONTROLS</div>
+        </div>
+        <div class="menu-footer">
+          4 AIRCRAFT &middot; DYNAMIC WEATHER &middot; DAY/NIGHT CYCLE &middot; AUTOPILOT &middot; ILS LANDING
+        </div>
+      </div>
+
+      <!-- Pause Menu -->
+      <div id="pause-menu" class="menu-panel hidden">
+        <div class="menu-panel-title">PAUSED</div>
+        <div class="menu-buttons">
+          <div class="menu-btn menu-btn-primary" id="menu-resume">RESUME</div>
+          <div class="menu-btn" id="menu-pause-settings">SETTINGS</div>
+          <div class="menu-btn" id="menu-pause-controls">CONTROLS</div>
+          <div class="menu-btn" id="menu-reset">RESET FLIGHT</div>
+          <div class="menu-btn menu-btn-danger" id="menu-main-return">MAIN MENU</div>
+        </div>
+      </div>
+
+      <!-- Settings Panel -->
+      <div id="settings-panel" class="menu-panel menu-panel-wide hidden">
+        <div class="menu-panel-title">SETTINGS</div>
+        <div class="settings-grid">
+          <div class="settings-row">
+            <label class="settings-label">MASTER VOLUME</label>
+            <div class="settings-control">
+              <input type="range" id="setting-volume" class="settings-slider" min="0" max="100" value="80">
+              <span class="settings-value" id="setting-volume-value">80%</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">TIME OF DAY</label>
+            <div class="settings-control">
+              <input type="range" id="setting-tod" class="settings-slider" min="0" max="23.5" step="0.5" value="12">
+              <span class="settings-value" id="setting-tod-value">12:00</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">GPWS CALLOUTS</label>
+            <div class="settings-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-gpws" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="menu-btn menu-btn-back" id="settings-back">BACK</div>
+      </div>
+
+      <!-- Controls Reference -->
+      <div id="controls-panel" class="menu-panel menu-panel-wide hidden">
+        <div class="menu-panel-title">CONTROLS</div>
+        <div class="controls-grid">
+          <div class="controls-section">
+            <div class="controls-section-title">FLIGHT</div>
+            <div class="controls-row"><span class="key-badge">W</span><span class="key-badge">S</span> <span class="controls-desc">Pitch</span></div>
+            <div class="controls-row"><span class="key-badge">A</span><span class="key-badge">D</span> <span class="controls-desc">Roll</span></div>
+            <div class="controls-row"><span class="key-badge">Q</span><span class="key-badge">E</span> <span class="controls-desc">Yaw</span></div>
+            <div class="controls-row"><span class="key-badge">Shift</span><span class="key-badge">Ctrl</span> <span class="controls-desc">Throttle</span></div>
+            <div class="controls-row"><span class="key-badge">Space</span> <span class="controls-desc">Brake</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">SYSTEMS</div>
+            <div class="controls-row"><span class="key-badge">G</span> <span class="controls-desc">Gear</span></div>
+            <div class="controls-row"><span class="key-badge">F</span> <span class="controls-desc">Flaps</span></div>
+            <div class="controls-row"><span class="key-badge">B</span> <span class="controls-desc">Speedbrake</span></div>
+            <div class="controls-row"><span class="key-badge">L</span> <span class="controls-desc">Landing lights</span></div>
+            <div class="controls-row"><span class="key-badge">V</span> <span class="controls-desc">Camera mode</span></div>
+            <div class="controls-row"><span class="key-badge">R</span> <span class="controls-desc">Reset</span></div>
+            <div class="controls-row"><span class="key-badge">1-4</span> <span class="controls-desc">Select aircraft</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">AUTOPILOT</div>
+            <div class="controls-row"><span class="key-badge">Z</span> <span class="controls-desc">AP master</span></div>
+            <div class="controls-row"><span class="key-badge">H</span> <span class="controls-desc">Heading hold</span></div>
+            <div class="controls-row"><span class="key-badge">J</span> <span class="controls-desc">Altitude hold</span></div>
+            <div class="controls-row"><span class="key-badge">N</span> <span class="controls-desc">Vertical speed</span></div>
+            <div class="controls-row"><span class="key-badge">M</span> <span class="controls-desc">Speed hold</span></div>
+            <div class="controls-row"><span class="key-badge">;</span> <span class="controls-desc">Approach mode</span></div>
+            <div class="controls-row"><span class="key-badge">&larr;&rarr;</span> <span class="controls-desc">Adjust heading</span></div>
+            <div class="controls-row"><span class="key-badge">&uarr;&darr;</span> <span class="controls-desc">Adjust altitude</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">ENVIRONMENT</div>
+            <div class="controls-row"><span class="key-badge">[</span><span class="key-badge">]</span> <span class="controls-desc">Time of day</span></div>
+            <div class="controls-row"><span class="key-badge">T</span> <span class="controls-desc">Auto time cycle</span></div>
+            <div class="controls-row"><span class="key-badge">P</span> <span class="controls-desc">Weather preset</span></div>
+            <div class="controls-row"><span class="key-badge">=</span> <span class="controls-desc">Toggle replay</span></div>
+            <div class="controls-row"><span class="key-badge">+</span><span class="key-badge">-</span> <span class="controls-desc">Replay speed</span></div>
+            <div class="controls-row"><span class="key-badge">Esc</span> <span class="controls-desc">Pause menu</span></div>
+          </div>
+        </div>
+        <div class="menu-btn menu-btn-back" id="controls-back">BACK</div>
+      </div>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud">
+      <!-- Primary Flight Display — left -->
+      <div id="pfd" class="glass-panel">
+        <div class="pfd-tape">
+          <div class="tape-label">IAS</div>
+          <div class="tape-value" id="hud-speed">0</div>
+          <div class="tape-unit">KTS</div>
+        </div>
+        <div class="pfd-divider"></div>
+        <div class="pfd-tape">
+          <div class="tape-label">ALT</div>
+          <div class="tape-value" id="hud-altitude">0</div>
+          <div class="tape-unit">FT</div>
+        </div>
+        <div class="pfd-divider"></div>
+        <div class="pfd-tape">
+          <div class="tape-label">VS</div>
+          <div class="tape-value" id="hud-vspeed">0</div>
+          <div class="tape-unit">FPM</div>
+        </div>
+        <div class="pfd-divider"></div>
+        <div class="pfd-tape">
+          <div class="tape-label">HDG</div>
+          <div class="tape-value" id="hud-heading">000</div>
+          <div class="tape-unit">&deg;</div>
+        </div>
+        <div class="pfd-divider"></div>
+        <div class="pfd-tape">
+          <div class="tape-label">AOA</div>
+          <div class="tape-value tape-value-sm" id="hud-aoa">0.0&deg;</div>
+          <div class="tape-unit">DEG</div>
+        </div>
+        <div class="pfd-divider"></div>
+        <div class="pfd-tape">
+          <div class="tape-label">G</div>
+          <div class="tape-value tape-value-sm" id="hud-gforce">1.0G</div>
+          <div class="tape-unit">LOAD</div>
+        </div>
+      </div>
+
+      <!-- Attitude Indicator — top center -->
+      <div id="attitude-panel" class="glass-panel">
+        <div id="attitude-indicator">
+          <div id="attitude-horizon"></div>
+          <div id="attitude-crosshair"></div>
+          <div id="attitude-bank-pointer"></div>
+        </div>
+      </div>
+
+      <!-- Systems panel — right -->
+      <div id="systems" class="glass-panel">
+        <div class="sys-row">
+          <span class="sys-label">THR</span>
+          <div class="sys-bar-track">
+            <div class="sys-bar-fill" id="throttle-bar"></div>
+          </div>
+          <span class="sys-pct" id="hud-throttle">0%</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">GEAR</span>
+          <span class="sys-status" id="hud-gear">DOWN</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">FLAPS</span>
+          <span class="sys-status" id="hud-flaps">UP</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">SBRK</span>
+          <span class="sys-status" id="hud-speedbrake">OFF</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">BRK</span>
+          <span class="sys-status" id="hud-brake">OFF</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">LIGHT</span>
+          <span class="sys-status" id="hud-lights">OFF</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">WIND</span>
+          <span class="sys-status" id="hud-wind">---/--KT</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">WX</span>
+          <span class="sys-status" id="hud-weather">CLEAR</span>
+        </div>
+      </div>
+
+      <!-- Autopilot Panel -->
+      <div id="ap-panel" class="glass-panel" style="display: none;">
+        <div class="ap-label">AUTOPILOT</div>
+        <div class="ap-modes">
+          <span id="ap-hdg" class="ap-mode">HDG</span>
+          <span id="ap-alt" class="ap-mode">ALT</span>
+          <span id="ap-vs" class="ap-mode">VS</span>
+          <span id="ap-spd" class="ap-mode">SPD</span>
+          <span id="ap-apr" class="ap-mode">APR</span>
+        </div>
+        <div class="ap-targets">
+          <span id="ap-target-hdg" class="ap-target">HDG 360</span>
+          <span id="ap-target-alt" class="ap-target">ALT 3000ft</span>
+        </div>
+      </div>
+
+      <!-- ILS Approach Indicator -->
+      <div id="ils-panel" class="glass-panel" style="display: none;">
+        <div class="ils-label">ILS</div>
+        <div id="ils-dme" class="ils-dme">0.0 NM</div>
+        <div class="ils-crosshair">
+          <!-- Localizer scale (horizontal) -->
+          <div class="ils-scale ils-scale-h">
+            <div class="ils-dot"></div>
+            <div class="ils-dot"></div>
+            <div class="ils-center-mark ils-center-h"></div>
+            <div class="ils-dot"></div>
+            <div class="ils-dot"></div>
+          </div>
+          <!-- Glideslope scale (vertical) -->
+          <div class="ils-scale ils-scale-v">
+            <div class="ils-dot"></div>
+            <div class="ils-dot"></div>
+            <div class="ils-center-mark ils-center-v"></div>
+            <div class="ils-dot"></div>
+            <div class="ils-dot"></div>
+          </div>
+          <!-- Moving diamonds -->
+          <div id="loc-diamond" class="ils-diamond ils-diamond-h"></div>
+          <div id="gs-diamond" class="ils-diamond ils-diamond-v"></div>
+        </div>
+      </div>
+
+      <!-- Landing Score Panel -->
+      <div id="landing-score-panel" class="glass-panel" style="display: none;">
+        <div class="score-header">LANDING SCORE</div>
+        <div id="score-grade" class="score-grade">A</div>
+        <div id="score-total" class="score-total">85/100</div>
+        <div class="score-details">
+          <div class="score-row"><span class="score-label">V/S</span><span id="score-vs" class="score-value">-120 FPM</span></div>
+          <div class="score-row"><span class="score-label">CENTER</span><span id="score-cl" class="score-value">2.1m</span></div>
+          <div class="score-row"><span class="score-label">T/D ZONE</span><span id="score-tz" class="score-value">320m</span></div>
+          <div class="score-row"><span class="score-label">SPEED</span><span id="score-speed" class="score-value">125 KTS</span></div>
+        </div>
+        <div id="score-best" class="score-best">NEW BEST!</div>
+        <div class="score-hint">PRESS R TO RETRY</div>
+      </div>
+
+      <!-- Stall warning overlay -->
+      <div id="hud-stall-warning" class="stall-warning" style="display: none;">STALL</div>
+
+      <!-- GPWS warning overlay -->
+      <div id="hud-gpws-warning" class="gpws-warning" style="display: none;">PULL UP</div>
+
+      <!-- Taxi indicator -->
+      <div id="hud-taxi" class="taxi-indicator" style="display: none;">TAXI</div>
+
+      <!-- Aircraft name display -->
+      <div id="hud-aircraft-name" class="aircraft-name-display">Cessna 172</div>
+
+      <!-- Time display -->
+      <div id="hud-time" class="time-display">12:00 LOCAL</div>
+
+      <!-- Replay indicator -->
+      <div id="hud-replay" class="replay-indicator" style="display: none;">REPLAY 1x</div>
+      <div id="replay-progress-bar" class="replay-progress-bar" style="display: none;">
+        <div id="replay-progress" class="replay-progress-fill"></div>
+      </div>
+
+      <!-- State bar — bottom -->
+      <div id="state-bar">
+        <div id="hud-state" class="state-label">GROUNDED</div>
+        <div id="hud-message" class="state-message"></div>
+      </div>
+
+      <!-- Minimap -->
+      <div id="minimap-panel" class="glass-panel">
+        <canvas id="minimap-canvas" width="180" height="180"></canvas>
+      </div>
+    </div>
+
+    <!-- Aircraft Selection Panel -->
+    <div id="aircraft-select" class="glass-panel">
+      <div class="select-title">SELECT AIRCRAFT</div>
+      <div class="aircraft-option selected" data-type="cessna_172">1. Cessna 172</div>
+      <div class="aircraft-option" data-type="boeing_737">2. Boeing 737</div>
+      <div class="aircraft-option" data-type="f16">3. F-16 Falcon</div>
+      <div class="aircraft-option" data-type="airbus_a320">4. Airbus A320</div>
+      <div class="select-divider"></div>
+      <div class="select-title">START POSITION - AIRPORT 1</div>
+      <div class="spawn-option selected" data-spawn="runway">Runway</div>
+      <div class="spawn-option" data-spawn="gate">Gate / Hangar</div>
+      <div class="select-title">START POSITION - AIRPORT 2</div>
+      <div class="spawn-option" data-spawn="runway_apt2">Runway (Airport 2)</div>
+      <div class="spawn-option" data-spawn="gate_apt2">Gate (Airport 2)</div>
+      <div class="select-divider"></div>
+      <div class="select-title">LANDING CHALLENGE</div>
+      <div class="spawn-option" data-spawn="short_final">Short Final (1.5nm / 500ft)</div>
+      <div class="spawn-option" data-spawn="long_final">Long Final (3nm / 1000ft)</div>
+      <div class="select-divider"></div>
+      <div class="start-btn" id="start-btn">START</div>
+    </div>
+
+    <!-- Controls hint -->
+    <div id="controls-help">
+      W/S Pitch &middot; A/D Roll &middot; Q/E Yaw &middot; Shift/Ctrl Throttle &middot; Space Brake &middot; G Gear &middot; F Flaps &middot; B Speedbrake &middot; V Camera &middot; R Reset &middot; 1-4 Aircraft &middot; L Lights &middot; [/] Time &middot; T Auto-Time &middot; P Weather &middot; Z AP &middot; = Replay
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
