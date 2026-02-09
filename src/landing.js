@@ -239,38 +239,42 @@ export function updateLandingAssist(dt) {
 
   const ils = computeILSGuidance(state);
   if (!ils || ils.pastThreshold) {
-    // Past the runway — cut assist, let player flare
     disableLandingAssist();
     return null;
   }
 
-  const takeoffSpd = state.config ? state.config.takeoffSpeed : 55;
-  const vrefSpeed = takeoffSpd * 0.72; // target approach speed
+  // Only useful within 10nm of threshold
+  if (ils.distNM > 10) {
+    return null;
+  }
 
-  // Glideslope: compute desired VS from GS deviation
-  // Target: 3-degree glideslope = ~-700 fpm at typical approach speed
-  const targetVsFpm = -Math.tan(GLIDESLOPE_RAD) * (state.speed * MS_TO_FPM / MS_TO_KNOTS) * 60;
+  const takeoffSpd = state.config ? state.config.takeoffSpeed : 55;
+  const vrefSpeed = takeoffSpd * 0.75; // target approach speed
+
+  // Target VS for a 3-degree glideslope: VS = -groundspeed * tan(angle)
+  // state.speed is m/s, MS_TO_FPM converts m/s → ft/min
+  const baseVsFpm = -Math.tan(GLIDESLOPE_RAD) * state.speed * MS_TO_FPM;
   const currentVsFpm = state.verticalSpeed * MS_TO_FPM;
 
-  // GS correction — steer VS toward glideslope
-  const gsCorrection = ils.gsDots * 200; // +dots = above, need more negative VS
-  const desiredVs = targetVsFpm - gsCorrection;
+  // GS correction: +dots = above glideslope → need steeper descent
+  const gsCorrection = ils.gsDots * 150;
+  const desiredVs = baseVsFpm - gsCorrection;
   const vsError = desiredVs - currentVsFpm;
 
-  // Simple PI for pitch
+  // PI controller for pitch
   assistPitchIntegral += vsError * dt;
-  assistPitchIntegral = clamp(assistPitchIntegral, -500, 500);
+  assistPitchIntegral = clamp(assistPitchIntegral, -300, 300);
 
   const pitchCommand = clamp(
-    vsError * 0.002 + assistPitchIntegral * 0.0003,
-    -0.6, 0.6
+    vsError * 0.0015 + assistPitchIntegral * 0.0002,
+    -0.4, 0.4
   );
 
-  // Auto-throttle: hold approach speed
+  // Auto-throttle: hold approach speed with gentle correction
   const speedError = vrefSpeed - state.speed;
   const throttleCommand = clamp(
-    0.2 + speedError * 0.08,
-    0.0, 0.7
+    0.25 + speedError * 0.04,
+    0.05, 0.6
   );
 
   return { pitchCommand, throttleCommand };
