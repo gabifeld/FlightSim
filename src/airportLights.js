@@ -27,8 +27,8 @@ function createLightFixtureMaterial(color, emissive) {
   return new THREE.MeshStandardMaterial({
     color: color,
     emissive: emissive,
-    emissiveIntensity: 1.2,
-    roughness: 0.3,
+    emissiveIntensity: 2.0,
+    roughness: 0.2,
   });
 }
 
@@ -177,7 +177,7 @@ export function initAirportLights(scene) {
 
   // --- Light pool (reusable PointLights) ---
   for (let i = 0; i < POOL_SIZE; i++) {
-    const light = new THREE.PointLight(0xffeedd, 0, 150);
+    const light = new THREE.PointLight(0xffeedd, 0, 300);
     light.visible = false;
     scene.add(light);
     lightPool.push(light);
@@ -201,8 +201,8 @@ export function updateAirportLights(dt) {
     for (const als of approachMeshes) {
       const rowPhase = als.row / 10;
       const dist = Math.abs(phase - (1 - rowPhase)); // inverse: far fires first
-      const flash = dist < 0.08 ? 3.0 : als.baseIntensity;
-      als.mesh.material.emissiveIntensity = nightMode ? flash : 0.3;
+      const flash = dist < 0.08 ? 8.0 : 5.0;
+      als.mesh.material.emissiveIntensity = flash;
     }
   } else {
     for (const als of approachMeshes) {
@@ -211,15 +211,15 @@ export function updateAirportLights(dt) {
   }
 
   // Update emissive intensity based on night mode
-  const emissiveMul = nightMode ? 2.5 : 0.3;
+  const emissiveMul = nightMode ? 5.0 : 0.3;
   if (edgeInstanced) edgeInstanced.material.emissiveIntensity = emissiveMul;
-  if (threshGreenInstanced) threshGreenInstanced.material.emissiveIntensity = emissiveMul;
-  if (threshRedInstanced) threshRedInstanced.material.emissiveIntensity = emissiveMul;
-  if (taxiBlueInstanced) taxiBlueInstanced.material.emissiveIntensity = emissiveMul;
+  if (threshGreenInstanced) threshGreenInstanced.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
+  if (threshRedInstanced) threshRedInstanced.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
+  if (taxiBlueInstanced) taxiBlueInstanced.material.emissiveIntensity = nightMode ? 4.0 : 0.3;
 
   // PAPI lights emissive update
   for (const papi of papiLights) {
-    papi.mesh.material.emissiveIntensity = nightMode ? 2.5 : 0.3;
+    papi.mesh.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
   }
 
   // Pool PointLights: position on nearest fixtures to aircraft
@@ -238,7 +238,7 @@ export function updateAirportLights(dt) {
 
       // In-place distance computation + partial sort (only need top POOL_SIZE)
       // Use a simple selection approach instead of full sort
-      const maxDistSq = 800 * 800;
+      const maxDistSq = 1500 * 1500;
       const candidates = [];
       for (let i = 0; i < fixturePositions.length; i++) {
         const f = fixturePositions[i];
@@ -257,8 +257,8 @@ export function updateAirportLights(dt) {
         const f = fixturePositions[sortedCache[i].idx];
         light.position.set(f.x, f.y + 1, f.z);
         light.visible = true;
-        light.intensity = 4;
-        light.distance = 150;
+        light.intensity = 12;
+        light.distance = 300;
 
         // Color based on type
         if (f.type === 'threshold_green') light.color.setHex(0x00ff44);

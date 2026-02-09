@@ -42,7 +42,8 @@ let scoreCallback = null;
 
 // ── Landing Assist ──
 let landingAssistActive = false;
-let assistPitchIntegral = 0;
+let assistVsIntegral = 0;
+let assistSpdIntegral = 0;
 
 export function isLandingMode() {
   return landingModeActive;
@@ -210,7 +211,8 @@ export function recordTouchdown(vs, groundSpeed) {
 
 export function toggleLandingAssist() {
   landingAssistActive = !landingAssistActive;
-  assistPitchIntegral = 0;
+  assistVsIntegral = 0;
+  assistSpdIntegral = 0;
 }
 
 export function isLandingAssistActive() {
@@ -219,12 +221,14 @@ export function isLandingAssistActive() {
 
 export function disableLandingAssist() {
   landingAssistActive = false;
-  assistPitchIntegral = 0;
+  assistVsIntegral = 0;
+  assistSpdIntegral = 0;
 }
 
 /**
  * Landing assist: auto-manages pitch and throttle to follow the glideslope.
  * Player only steers left/right. Returns { pitchCommand, throttleCommand } or null.
+ * Mirrors the autopilot APR mode logic but simplified.
  */
 export function updateLandingAssist(dt) {
   if (!landingAssistActive) return null;
@@ -249,32 +253,35 @@ export function updateLandingAssist(dt) {
   }
 
   const takeoffSpd = state.config ? state.config.takeoffSpeed : 55;
-  const vrefSpeed = takeoffSpd * 0.75; // target approach speed
+  const vrefSpeed = takeoffSpd * 0.8; // approach speed ~80% of takeoff speed
 
-  // Target VS for a 3-degree glideslope: VS = -groundspeed * tan(angle)
-  // state.speed is m/s, MS_TO_FPM converts m/s → ft/min
-  const baseVsFpm = -Math.tan(GLIDESLOPE_RAD) * state.speed * MS_TO_FPM;
   const currentVsFpm = state.verticalSpeed * MS_TO_FPM;
 
-  // GS correction: +dots = above glideslope → need steeper descent
-  const gsCorrection = ils.gsDots * 150;
-  const desiredVs = baseVsFpm - gsCorrection;
-  const vsError = desiredVs - currentVsFpm;
+  // Glideslope tracking: use GS dots to compute a target VS
+  // -gsDots because: positive dots = above GS, so we need negative VS correction
+  // Scale: each dot ≈ 300 fpm correction, base descent ~-700 fpm
+  const baseVs = -Math.tan(GLIDESLOPE_RAD) * state.speed * MS_TO_FPM;
+  const targetVs = clamp(baseVs - ils.gsDots * 300, -1500, 200);
 
-  // PI controller for pitch
-  assistPitchIntegral += vsError * dt;
-  assistPitchIntegral = clamp(assistPitchIntegral, -300, 300);
+  // PI controller: VS error → pitch command
+  // Matches autopilot vsPID gains: kp=0.003, ki=0.0005
+  const vsErr = targetVs - currentVsFpm;
+  assistVsIntegral += vsErr * dt;
+  assistVsIntegral = clamp(assistVsIntegral, -2000, 2000);
 
   const pitchCommand = clamp(
-    vsError * 0.0015 + assistPitchIntegral * 0.0002,
-    -0.4, 0.4
+    vsErr * 0.003 + assistVsIntegral * 0.0005,
+    -0.8, 0.8
   );
 
-  // Auto-throttle: hold approach speed with gentle correction
-  const speedError = vrefSpeed - state.speed;
+  // Auto-throttle: PI for speed hold
+  const spdErr = vrefSpeed - state.speed;
+  assistSpdIntegral += spdErr * dt;
+  assistSpdIntegral = clamp(assistSpdIntegral, -20, 20);
+
   const throttleCommand = clamp(
-    0.25 + speedError * 0.04,
-    0.05, 0.6
+    0.3 + spdErr * 0.06 + assistSpdIntegral * 0.01,
+    0.05, 0.8
   );
 
   return { pitchCommand, throttleCommand };
