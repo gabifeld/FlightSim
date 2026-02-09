@@ -3,6 +3,17 @@ import { getSetting, setSetting } from './settings.js';
 import { setMasterVolume } from './audio.js';
 import { setTimeOfDay, getTimeOfDay } from './scene.js';
 
+// Helper: listen for both click and touchend to ensure mobile compatibility.
+// Prevents double-fire by consuming the event on touchend.
+function onTap(el, handler) {
+  if (!el) return;
+  el.addEventListener('click', handler);
+  el.addEventListener('touchend', (e) => {
+    e.preventDefault();
+    handler(e);
+  });
+}
+
 let paused = false;
 let activePanel = 'main'; // 'main' | 'pause' | 'settings' | 'controls' | null
 let returnTo = null; // which panel to return to from settings/controls
@@ -41,64 +52,48 @@ export function initMenu() {
   };
 
   // Main menu buttons
-  if (els.btnFly) {
-    els.btnFly.addEventListener('click', () => {
-      hideAllPanels();
-      // Show the aircraft selection panel
-      const selectPanel = document.getElementById('aircraft-select');
-      if (selectPanel) selectPanel.classList.remove('hidden');
-      els.overlay.classList.add('hidden');
-      activePanel = null;
-    });
-  }
+  onTap(els.btnFly, () => {
+    hideAllPanels();
+    // Show the aircraft selection panel
+    const selectPanel = document.getElementById('aircraft-select');
+    if (selectPanel) selectPanel.classList.remove('hidden');
+    els.overlay.classList.add('hidden');
+    activePanel = null;
+  });
 
-  if (els.btnMainSettings) {
-    els.btnMainSettings.addEventListener('click', () => {
-      returnTo = 'main';
-      showPanel('settings');
-    });
-  }
+  onTap(els.btnMainSettings, () => {
+    returnTo = 'main';
+    showPanel('settings');
+  });
 
-  if (els.btnMainControls) {
-    els.btnMainControls.addEventListener('click', () => {
-      returnTo = 'main';
-      showPanel('controls');
-    });
-  }
+  onTap(els.btnMainControls, () => {
+    returnTo = 'main';
+    showPanel('controls');
+  });
 
   // Pause menu buttons
-  if (els.btnResume) {
-    els.btnResume.addEventListener('click', resumeGame);
-  }
+  onTap(els.btnResume, () => resumeGame());
 
-  if (els.btnPauseSettings) {
-    els.btnPauseSettings.addEventListener('click', () => {
-      returnTo = 'pause';
-      showPanel('settings');
-    });
-  }
+  onTap(els.btnPauseSettings, () => {
+    returnTo = 'pause';
+    showPanel('settings');
+  });
 
-  if (els.btnPauseControls) {
-    els.btnPauseControls.addEventListener('click', () => {
-      returnTo = 'pause';
-      showPanel('controls');
-    });
-  }
+  onTap(els.btnPauseControls, () => {
+    returnTo = 'pause';
+    showPanel('controls');
+  });
 
-  if (els.btnReset) {
-    els.btnReset.addEventListener('click', () => {
-      resumeGame();
-      if (onResumeCallback) onResumeCallback('reset');
-    });
-  }
+  onTap(els.btnReset, () => {
+    resumeGame();
+    if (onResumeCallback) onResumeCallback('reset');
+  });
 
-  if (els.btnMainMenuReturn) {
-    els.btnMainMenuReturn.addEventListener('click', () => {
-      paused = false;
-      if (onMainMenuCallback) onMainMenuCallback();
-      showPanel('main');
-    });
-  }
+  onTap(els.btnMainMenuReturn, () => {
+    paused = false;
+    if (onMainMenuCallback) onMainMenuCallback();
+    showPanel('main');
+  });
 
   // Settings controls
   if (els.volumeSlider) {
@@ -131,17 +126,13 @@ export function initMenu() {
   }
 
   // Back buttons
-  if (els.btnSettingsBack) {
-    els.btnSettingsBack.addEventListener('click', () => {
-      showPanel(returnTo || 'main');
-    });
-  }
+  onTap(els.btnSettingsBack, () => {
+    showPanel(returnTo || 'main');
+  });
 
-  if (els.btnControlsBack) {
-    els.btnControlsBack.addEventListener('click', () => {
-      showPanel(returnTo || 'main');
-    });
-  }
+  onTap(els.btnControlsBack, () => {
+    showPanel(returnTo || 'main');
+  });
 
   // Show main menu on load
   showPanel('main');

@@ -1167,6 +1167,10 @@ body {
   #mobile-controls { display: block; }
 }
 
+#mobile-controls.mob-hidden {
+  display: none !important;
+}
+
 /* ─── Throttle Slider ─── */
 .mob-throttle-track {
   position: absolute;

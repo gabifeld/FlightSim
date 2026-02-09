@@ -169,9 +169,19 @@ export function initControls() {
     for (const k in keys) keys[k] = false;
   });
 
-  // Click handlers for aircraft selection panel
+  // Helper: click + touchend for mobile compatibility
+  function onTap(el, handler) {
+    if (!el) return;
+    el.addEventListener('click', handler);
+    el.addEventListener('touchend', (e) => {
+      e.preventDefault();
+      handler(e);
+    });
+  }
+
+  // Click/tap handlers for aircraft selection panel
   document.querySelectorAll('.aircraft-option').forEach((el) => {
-    el.addEventListener('click', () => {
+    onTap(el, () => {
       const type = el.dataset.type;
       if (type) {
         document.querySelectorAll('.aircraft-option').forEach(o => o.classList.remove('selected'));
@@ -182,7 +192,7 @@ export function initControls() {
 
   // Spawn location selection
   document.querySelectorAll('.spawn-option').forEach((el) => {
-    el.addEventListener('click', () => {
+    onTap(el, () => {
       document.querySelectorAll('.spawn-option').forEach(o => o.classList.remove('selected'));
       el.classList.add('selected');
     });
@@ -190,32 +200,30 @@ export function initControls() {
 
   // Start button
   const startBtn = document.getElementById('start-btn');
-  if (startBtn) {
-    startBtn.addEventListener('click', () => {
-      // Get selected aircraft
-      const selectedAircraft = document.querySelector('.aircraft-option.selected');
-      const type = selectedAircraft ? selectedAircraft.dataset.type : 'cessna_172';
+  onTap(startBtn, () => {
+    // Get selected aircraft
+    const selectedAircraft = document.querySelector('.aircraft-option.selected');
+    const type = selectedAircraft ? selectedAircraft.dataset.type : 'cessna_172';
 
-      // Get selected spawn
-      const selectedSpawn = document.querySelector('.spawn-option.selected');
-      const spawn = selectedSpawn ? selectedSpawn.dataset.spawn : 'runway';
+    // Get selected spawn
+    const selectedSpawn = document.querySelector('.spawn-option.selected');
+    const spawn = selectedSpawn ? selectedSpawn.dataset.spawn : 'runway';
 
-      // Check if this is an approach spawn (landing mode)
-      if (APPROACH_CONFIGS[spawn]) {
-        startLandingMode(spawn);
-      } else {
-        exitLandingMode();
-      }
+    // Check if this is an approach spawn (landing mode)
+    if (APPROACH_CONFIGS[spawn]) {
+      startLandingMode(spawn);
+    } else {
+      exitLandingMode();
+    }
 
-      setSpawnLocation(spawn);
-      switchAircraft(type);
+    setSpawnLocation(spawn);
+    switchAircraft(type);
 
-      // Hide panel and notify menu system
-      const panel = document.getElementById('aircraft-select');
-      if (panel) panel.classList.add('hidden');
-      onGameStart();
-    });
-  }
+    // Hide panel and notify menu system
+    const panel = document.getElementById('aircraft-select');
+    if (panel) panel.classList.add('hidden');
+    onGameStart();
+  });
 
   // Hide aircraft select on load (main menu shows first)
   const selectPanel = document.getElementById('aircraft-select');

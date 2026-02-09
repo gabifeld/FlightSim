@@ -2,7 +2,7 @@
 
 import { aircraftState } from './aircraft.js';
 import { playGearSound, playFlapSound } from './audio.js';
-import { togglePause } from './menu.js';
+import { togglePause, isMenuOpen } from './menu.js';
 import { toggleCamera } from './camera.js';
 
 const TILT_DEADZONE = 8;   // degrees
@@ -231,14 +231,26 @@ function setupTiltPrompt() {
 
   if (typeof DeviceOrientationEvent !== 'undefined' &&
       typeof DeviceOrientationEvent.requestPermission === 'function') {
+    // iOS: must use 'click' — it's the only event type iOS counts as
+    // a user activation for DeviceOrientationEvent.requestPermission()
     prompt.style.display = 'block';
-    prompt.addEventListener('touchstart', (e) => {
-      e.preventDefault();
+    prompt.addEventListener('click', () => {
       requestTiltPermission();
-    }, { passive: false });
+    });
   } else {
+    // Android / desktop: no permission needed, auto-enable
     prompt.style.display = 'none';
     requestTiltPermission();
+  }
+}
+
+// Show the tilt prompt after menu closes (so it's not hidden behind the overlay)
+export function showTiltPromptIfNeeded() {
+  if (!overlay || tiltPermissionGranted) return;
+  const prompt = overlay.querySelector('.mob-tilt-prompt');
+  if (prompt && typeof DeviceOrientationEvent !== 'undefined' &&
+      typeof DeviceOrientationEvent.requestPermission === 'function') {
+    prompt.style.display = 'block';
   }
 }
 
@@ -287,6 +299,11 @@ export function initMobile() {
 
 export function updateMobile(dt) {
   if (!state.active) return;
+
+  // Hide controls when menu is open so they don't intercept taps
+  if (overlay) {
+    overlay.classList.toggle('mob-hidden', isMenuOpen());
+  }
 
   // Smooth tilt to state
   const targetPitch = applyTiltDeadzone(rawPitch);
