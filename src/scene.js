@@ -1,17 +1,22 @@
 import * as THREE from 'three';
 import { Sky } from 'three/addons/objects/Sky.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
-import { onResize } from './postprocessing.js';
-import { DEFAULT_TIME_OF_DAY, TIME_CYCLE_RATE } from './constants.js';
+import { DEFAULT_TIME_OF_DAY, TIME_CYCLE_RATE, TERRAIN_SIZE } from './constants.js';
 import { clamp, lerp } from './utils.js';
 
 export let scene, renderer;
+let _resizeCb = null;
+export function setResizeCallback(fn) { _resizeCb = fn; }
 export let sun;
 export let ambientLight, hemiLight;
 
 let sky;
 let lensflare;
 const sunPosition = new THREE.Vector3();
+const sunDirection = new THREE.Vector3();
+
+// Environment map for PBR reflections
+let envMapRT = null;
 
 // Time of day system
 let timeOfDay = DEFAULT_TIME_OF_DAY; // 0-24 hours
@@ -24,6 +29,30 @@ let starField = null;
 let moonMesh = null;
 let moonLight = null;
 
+const SHADOW_QUALITY_PRESETS = Object.freeze({
+  low: Object.freeze({
+    enabled: false,
+    mapSize: 1024,
+    frustum: 520,
+    bias: -0.0002,
+    radius: 1,
+  }),
+  medium: Object.freeze({
+    enabled: true,
+    mapSize: 1536,
+    frustum: 600,
+    bias: -0.00018,
+    radius: 2,
+  }),
+  high: Object.freeze({
+    enabled: true,
+    mapSize: 2048,
+    frustum: 680,
+    bias: -0.00014,
+    radius: 3,
+  }),
+});
+
 export function initScene(container) {
   scene = new THREE.Scene();
   // No fog — clean clear sky
@@ -34,9 +63,12 @@ export function initScene(container) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 0.65;
+  renderer.toneMappingExposure = 0.75;
   renderer.setClearColor(0x4a90d9);
   container.appendChild(renderer.domElement);
+
+  // Atmospheric fog for depth and haze
+  scene.fog = new THREE.FogExp2(0x8cb4de, 0.00004);
 
   // Ambient light (warm fill — boosted to compensate for lower exposure)
   ambientLight = new THREE.AmbientLight(0xd0d0d0, 1.0);
@@ -78,7 +110,7 @@ export function initScene(container) {
     const w = window.innerWidth;
     const h = window.innerHeight;
     renderer.setSize(w, h);
-    onResize(w, h);
+    if (_resizeCb) _resizeCb(w, h);
   });
 
   return { scene, renderer };
@@ -86,7 +118,7 @@ export function initScene(container) {
 
 function createSky() {
   sky = new Sky();
-  sky.scale.setScalar(30000);
+  sky.scale.setScalar(TERRAIN_SIZE);
   sky.material.fog = false;
   scene.add(sky);
 
@@ -97,6 +129,27 @@ function createSky() {
   skyUniforms['mieDirectionalG'].value = 0.7;
 
   setSunPosition(45, 180);
+}
+
+// Generate environment map from SKY ONLY for PBR reflections on aircraft
+// NOT applied to scene.environment (would wash out terrain colors)
+export function generateEnvironmentMap() {
+  if (!renderer || !sky) return;
+  const skyScene = new THREE.Scene();
+  const skyCopy = sky.clone();
+  skyCopy.material = sky.material;
+  skyScene.add(skyCopy);
+
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  if (envMapRT) envMapRT.dispose();
+  envMapRT = pmrem.fromScene(skyScene, 0, 0.1, TERRAIN_SIZE * 1.6);
+  // Do NOT set scene.environment — only aircraft materials use this via getEnvironmentMap()
+  pmrem.dispose();
+  skyScene.remove(skyCopy);
+}
+
+export function getEnvironmentMap() {
+  return envMapRT ? envMapRT.texture : null;
 }
 
 export function setSunPosition(elevationDeg, azimuthDeg) {
@@ -112,16 +165,35 @@ export function setSunPosition(elevationDeg, azimuthDeg) {
   // Sync directional light with sky sun
   sun.position.copy(sunPosition).multiplyScalar(2000);
 
-  // Sync fog color with sky (if fog enabled)
-  if (scene.fog) {
-    const fogColor = new THREE.Color();
-    fogColor.setHSL(0.58, 0.35, 0.72 + elevationDeg * 0.001);
-    scene.fog.color.copy(fogColor);
-  }
+  // Fog color handled in updateTimeOfDayLighting
 }
 
 export function getSunDirection() {
-  return sunPosition.clone().normalize();
+  return sunDirection.copy(sunPosition).normalize();
+}
+
+export function configureShadowQuality(level = 'high') {
+  const preset = SHADOW_QUALITY_PRESETS[level] || SHADOW_QUALITY_PRESETS.high;
+  if (!renderer || !sun) return preset;
+
+  renderer.shadowMap.enabled = preset.enabled;
+  sun.castShadow = preset.enabled;
+  sun.shadow.mapSize.set(preset.mapSize, preset.mapSize);
+  sun.shadow.camera.left = -preset.frustum;
+  sun.shadow.camera.right = preset.frustum;
+  sun.shadow.camera.top = preset.frustum;
+  sun.shadow.camera.bottom = -preset.frustum;
+  sun.shadow.bias = preset.bias;
+  sun.shadow.radius = preset.radius;
+  sun.shadow.needsUpdate = true;
+
+  // Force shadow map reallocation when quality changes.
+  if (sun.shadow.map) {
+    sun.shadow.map.dispose();
+    sun.shadow.map = null;
+  }
+
+  return preset;
 }
 
 function createLensflare() {
@@ -281,11 +353,8 @@ function updateTimeOfDayLighting() {
     hemiLight.intensity = lerp(0.15, 0.8, duskFactor);
   }
 
-  // Fog density
+  // Fog color (weather system controls density via weatherFx.js)
   if (scene.fog) {
-    scene.fog.density = lerp(0.000025, 0.000008, dayFactor);
-
-    // Fog color: blue day -> orange sunset -> dark navy night
     const fogColor = new THREE.Color();
     if (sunElevation > 10) {
       fogColor.setHSL(0.57, 0.35, 0.76);
@@ -297,10 +366,11 @@ function updateTimeOfDayLighting() {
       fogColor.setHSL(0.62, 0.3, 0.08);
     }
     scene.fog.color.copy(fogColor);
+    renderer.setClearColor(fogColor);
   }
 
   // Tone mapping exposure
-  renderer.toneMappingExposure = lerp(0.25, 0.65, duskFactor);
+  renderer.toneMappingExposure = lerp(0.25, 0.75, duskFactor);
 
   // Stars visibility
   if (starField) {

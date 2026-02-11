@@ -1,7 +1,7 @@
 // Autopilot system with PID controllers
 // Modes: HDG, ALT, VS, SPD, APR
 
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { computeILSGuidance } from './landing.js';
 import { clamp } from './utils.js';
 import { MS_TO_FPM, M_TO_FEET } from './constants.js';
@@ -115,9 +115,9 @@ export function toggleAPMaster() {
     ap.engaged = true;
     ap.disconnectReason = '';
     // Capture current values as targets if no modes active
-    ap.targetHeading = Math.round(aircraftState.heading);
-    ap.targetAltitude = Math.round(aircraftState.altitude * M_TO_FEET);
-    ap.targetSpeed = aircraftState.speed;
+    ap.targetHeading = Math.round(getActiveVehicle().heading);
+    ap.targetAltitude = Math.round(getActiveVehicle().altitude * M_TO_FEET);
+    ap.targetSpeed = getActiveVehicle().speed;
   }
 }
 
@@ -125,7 +125,7 @@ export function toggleHDGHold() {
   if (!ap.engaged) return;
   ap.hdgHold = !ap.hdgHold;
   if (ap.hdgHold) {
-    ap.targetHeading = Math.round(aircraftState.heading);
+    ap.targetHeading = Math.round(getActiveVehicle().heading);
     ap.aprMode = false;
     hdgPID.reset();
   }
@@ -135,7 +135,7 @@ export function toggleALTHold() {
   if (!ap.engaged) return;
   ap.altHold = !ap.altHold;
   if (ap.altHold) {
-    ap.targetAltitude = Math.round(aircraftState.altitude * M_TO_FEET);
+    ap.targetAltitude = Math.round(getActiveVehicle().altitude * M_TO_FEET);
     ap.vsMode = false;
     altPID.reset();
     vsPID.reset();
@@ -146,7 +146,7 @@ export function toggleVSMode() {
   if (!ap.engaged) return;
   ap.vsMode = !ap.vsMode;
   if (ap.vsMode) {
-    ap.targetVS = Math.round(aircraftState.verticalSpeed * MS_TO_FPM / 100) * 100;
+    ap.targetVS = Math.round(getActiveVehicle().verticalSpeed * MS_TO_FPM / 100) * 100;
     ap.altHold = false;
     vsPID.reset();
   }
@@ -156,7 +156,7 @@ export function toggleSPDHold() {
   if (!ap.engaged) return;
   ap.spdHold = !ap.spdHold;
   if (ap.spdHold) {
-    ap.targetSpeed = aircraftState.speed;
+    ap.targetSpeed = getActiveVehicle().speed;
     spdPID.reset();
   }
 }
@@ -218,7 +218,7 @@ export function updateAutopilot(dt) {
     return;
   }
 
-  const state = aircraftState;
+  const state = getActiveVehicle();
 
   // Auto-disconnect conditions
   if (state.onGround) {

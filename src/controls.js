@@ -1,4 +1,5 @@
-import { aircraftState, switchAircraft, setSpawnLocation, resetAircraft } from './aircraft.js';
+import { switchAircraft, setSpawnLocation } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { THROTTLE_RATE } from './constants.js';
 import { playGearSound, playFlapSound } from './audio.js';
 import { startLandingMode, exitLandingMode, isLandingMode, APPROACH_CONFIGS } from './landing.js';
@@ -13,6 +14,7 @@ import { toggleILS } from './hud.js';
 import { toggleLandingAssist } from './landing.js';
 import { cycleCloudDensity } from './terrain.js';
 import { toggleReplay, isReplayPlaying, scrubReplay, setReplaySpeed, getReplayState } from './replay.js';
+import { startCrosswind, startDaily, startEngineOut, startSpeedrun, resetChallenge } from './challenges.js';
 import { updateGamepad, getButtonJustPressed, isGamepadConnected } from './gamepad.js';
 import { togglePause, isPaused, isMenuOpen, onGameStart } from './menu.js';
 
@@ -20,6 +22,8 @@ const keys = {};
 let cameraToggleCallback = null;
 let resetCallback = null;
 let aircraftSelectCallback = null;
+let carSpawnCallback = null;
+let carDespawnCallback = null;
 
 // Keys used by the sim
 const SIM_KEYS = new Set([
@@ -34,16 +38,19 @@ const AIRCRAFT_MAP = {
   '2': 'boeing_737',
   '3': 'f16',
   '4': 'airbus_a320',
+  '5': 'dhc2_beaver',
 };
 
 export function getKeys() {
   return keys;
 }
 
-export function setCallbacks({ onCameraToggle, onReset, onAircraftSelect }) {
+export function setCallbacks({ onCameraToggle, onReset, onAircraftSelect, onCarSpawn, onCarDespawn }) {
   cameraToggleCallback = onCameraToggle;
   resetCallback = onReset;
   aircraftSelectCallback = onAircraftSelect;
+  carSpawnCallback = onCarSpawn || null;
+  carDespawnCallback = onCarDespawn || null;
 }
 
 export function initControls() {
@@ -76,17 +83,17 @@ export function initControls() {
     const mapped = mapKey(e);
 
     if (!keys[mapped]) {
-      // Toggle actions on first press only
-      if (mapped === 'g') {
-        aircraftState.gear = !aircraftState.gear;
+      // Toggle actions on first press only (aircraft-specific)
+      if (mapped === 'g' && isAircraft(getActiveVehicle())) {
+        getActiveVehicle().gear = !getActiveVehicle().gear;
         playGearSound();
       }
-      if (mapped === 'f') {
-        aircraftState.flaps = !aircraftState.flaps;
+      if (mapped === 'f' && isAircraft(getActiveVehicle())) {
+        getActiveVehicle().flaps = !getActiveVehicle().flaps;
         playFlapSound();
       }
-      if (mapped === 'b') {
-        aircraftState.speedbrake = !aircraftState.speedbrake;
+      if (mapped === 'b' && isAircraft(getActiveVehicle())) {
+        getActiveVehicle().speedbrake = !getActiveVehicle().speedbrake;
       }
       if (mapped === 'v' && cameraToggleCallback) {
         cameraToggleCallback();
@@ -97,14 +104,23 @@ export function initControls() {
 
       // Aircraft selection (1-4)
       if (AIRCRAFT_MAP[mapped]) {
+        // If currently in a car, despawn it first
+        if (!isAircraft(getActiveVehicle()) && carDespawnCallback) {
+          carDespawnCallback();
+        }
         switchAircraft(AIRCRAFT_MAP[mapped]);
         if (aircraftSelectCallback) aircraftSelectCallback(AIRCRAFT_MAP[mapped]);
         updateAircraftSelectUI(AIRCRAFT_MAP[mapped]);
       }
 
-      // Landing/taxi lights toggle
+      // Lights toggle (landing lights for aircraft, headlights for cars)
       if (mapped === 'l') {
-        aircraftState.landingLight = !aircraftState.landingLight;
+        const v = getActiveVehicle();
+        if (isAircraft(v)) {
+          v.landingLight = !v.landingLight;
+        } else if (v.headlights !== undefined) {
+          v.headlights = !v.headlights;
+        }
       }
 
       // Time of day controls
@@ -118,20 +134,22 @@ export function initControls() {
         toggleAutoCycleTime();
       }
 
-      // Autopilot controls
-      if (mapped === 'z') toggleAPMaster();
-      if (mapped === 'h') toggleHDGHold();
-      if (mapped === 'j') toggleALTHold();
-      if (mapped === 'n') toggleVSMode();
-      if (mapped === 'm') toggleSPDHold();
-      if (mapped === ';') toggleAPRMode();
+      // Autopilot controls (aircraft only)
+      if (isAircraft(getActiveVehicle())) {
+        if (mapped === 'z') toggleAPMaster();
+        if (mapped === 'h') toggleHDGHold();
+        if (mapped === 'j') toggleALTHold();
+        if (mapped === 'n') toggleVSMode();
+        if (mapped === 'm') toggleSPDHold();
+        if (mapped === ';') toggleAPRMode();
 
-      // Arrow keys: adjust AP targets
-      if (isAPEngaged()) {
-        if (e.key === 'ArrowLeft') adjustTargetHeading(-10);
-        if (e.key === 'ArrowRight') adjustTargetHeading(10);
-        if (e.key === 'ArrowUp') adjustTargetAltitude(100);
-        if (e.key === 'ArrowDown') adjustTargetAltitude(-100);
+        // Arrow keys: adjust AP targets
+        if (isAPEngaged()) {
+          if (e.key === 'ArrowLeft') adjustTargetHeading(-10);
+          if (e.key === 'ArrowRight') adjustTargetHeading(10);
+          if (e.key === 'ArrowUp') adjustTargetAltitude(100);
+          if (e.key === 'ArrowDown') adjustTargetAltitude(-100);
+        }
       }
 
       // Weather preset cycle
@@ -144,13 +162,13 @@ export function initControls() {
         cycleCloudDensity();
       }
 
-      // ILS toggle
-      if (mapped === 'i') {
+      // ILS toggle (aircraft only)
+      if (mapped === 'i' && isAircraft(getActiveVehicle())) {
         toggleILS();
       }
 
-      // Landing assist
-      if (mapped === 'k') {
+      // Landing assist (aircraft only)
+      if (mapped === 'k' && isAircraft(getActiveVehicle())) {
         toggleLandingAssist();
       }
 
@@ -215,21 +233,53 @@ export function initControls() {
   onTap(startBtn, () => {
     // Get selected aircraft
     const selectedAircraft = document.querySelector('.aircraft-option.selected');
-    const type = selectedAircraft ? selectedAircraft.dataset.type : 'cessna_172';
+    let type = selectedAircraft ? selectedAircraft.dataset.type : 'cessna_172';
 
     // Get selected spawn
     const selectedSpawn = document.querySelector('.spawn-option.selected');
     const spawn = selectedSpawn ? selectedSpawn.dataset.spawn : 'runway';
 
-    // Check if this is an approach spawn (landing mode)
-    if (APPROACH_CONFIGS[spawn]) {
-      startLandingMode(spawn);
-    } else {
-      exitLandingMode();
-    }
+    // Reset any previous challenge
+    resetChallenge();
 
-    setSpawnLocation(spawn);
-    switchAircraft(type);
+    // Route challenge spawns
+    if (spawn.startsWith('crosswind_')) {
+      const level = spawn.replace('crosswind_', '');
+      startCrosswind(level);
+      startLandingMode('short_final');
+      setSpawnLocation('short_final');
+      switchAircraft(type);
+    } else if (spawn === 'daily_challenge') {
+      const params = startDaily();
+      type = params.aircraft;
+      startLandingMode(params.approach);
+      setSpawnLocation(params.approach);
+      switchAircraft(type);
+    } else if (spawn === 'engine_out') {
+      startEngineOut();
+      startLandingMode('short_final');
+      setSpawnLocation('short_final');
+      switchAircraft(type);
+    } else if (spawn === 'speedrun') {
+      startSpeedrun();
+      exitLandingMode();
+      setSpawnLocation('runway');
+      switchAircraft(type);
+    } else if (spawn.startsWith('city_')) {
+      // City driving mode — spawn a car
+      const carType = spawn.replace('city_', '');
+      exitLandingMode();
+      if (carSpawnCallback) carSpawnCallback(carType);
+    } else {
+      // Default: existing logic
+      if (APPROACH_CONFIGS[spawn]) {
+        startLandingMode(spawn);
+      } else {
+        exitLandingMode();
+      }
+      setSpawnLocation(spawn);
+      switchAircraft(type);
+    }
 
     // Hide panel and notify menu system
     const panel = document.getElementById('aircraft-select');
@@ -262,11 +312,12 @@ export function clearKeys() {
 }
 
 export function updateThrottle(dt) {
+  if (!isAircraft(getActiveVehicle())) return;
   if (keys['shift']) {
-    aircraftState.throttle = Math.min(1, aircraftState.throttle + THROTTLE_RATE * dt);
+    getActiveVehicle().throttle = Math.min(1, getActiveVehicle().throttle + THROTTLE_RATE * dt);
   }
   if (keys['control']) {
-    aircraftState.throttle = Math.max(0, aircraftState.throttle - THROTTLE_RATE * dt);
+    getActiveVehicle().throttle = Math.max(0, getActiveVehicle().throttle - THROTTLE_RATE * dt);
   }
 }
 
@@ -274,17 +325,19 @@ export function updateControlsGamepad() {
   if (!isGamepadConnected()) return;
   updateGamepad();
 
-  // Gamepad button toggles
-  if (getButtonJustPressed(0)) { // A = gear
-    aircraftState.gear = !aircraftState.gear;
-    playGearSound();
-  }
-  if (getButtonJustPressed(1)) { // B = flaps
-    aircraftState.flaps = !aircraftState.flaps;
-    playFlapSound();
-  }
-  if (getButtonJustPressed(2)) { // X = speedbrake
-    aircraftState.speedbrake = !aircraftState.speedbrake;
+  // Gamepad button toggles (aircraft-specific)
+  if (isAircraft(getActiveVehicle())) {
+    if (getButtonJustPressed(0)) { // A = gear
+      getActiveVehicle().gear = !getActiveVehicle().gear;
+      playGearSound();
+    }
+    if (getButtonJustPressed(1)) { // B = flaps
+      getActiveVehicle().flaps = !getActiveVehicle().flaps;
+      playFlapSound();
+    }
+    if (getButtonJustPressed(2)) { // X = speedbrake
+      getActiveVehicle().speedbrake = !getActiveVehicle().speedbrake;
+    }
   }
   if (getButtonJustPressed(3) && cameraToggleCallback) { // Y = camera
     cameraToggleCallback();

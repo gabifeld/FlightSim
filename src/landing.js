@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { RUNWAY_LENGTH, RUNWAY_WIDTH, MS_TO_KNOTS, MS_TO_FPM } from './constants.js';
 import { saveBestScore, getBestScore } from './settings.js';
 import { clamp } from './utils.js';
@@ -141,7 +141,7 @@ export function recordTouchdown(vs, groundSpeed) {
   if (touchdownRecorded) return null;
   touchdownRecorded = true;
 
-  const pos = aircraftState.position;
+  const pos = getActiveVehicle().position;
   const distPastThreshold = pos.z - THRESHOLD_Z;
   const centerlineDeviation = Math.abs(pos.x);
   const vsFPM = Math.abs(vs * MS_TO_FPM);
@@ -195,7 +195,7 @@ export function recordTouchdown(vs, groundSpeed) {
   };
 
   // Track best score per aircraft (persistent via localStorage)
-  const key = aircraftState.currentType + '_' + (currentConfigName || 'free');
+  const key = getActiveVehicle().currentType + '_' + (currentConfigName || 'free');
   const isNewBest = saveBestScore(key, overall);
   if (isNewBest) {
     scoreData.newBest = true;
@@ -233,7 +233,7 @@ export function disableLandingAssist() {
 export function updateLandingAssist(dt) {
   if (!landingAssistActive) return null;
 
-  const state = aircraftState;
+  const state = getActiveVehicle();
 
   // Auto-disable on ground
   if (state.onGround) {

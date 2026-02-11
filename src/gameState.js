@@ -1,5 +1,7 @@
-import { aircraftState, resetAircraft } from './aircraft.js';
+import { resetAircraft } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { isOnRunway } from './runway.js';
+import { isInOcean } from './terrain.js';
 import { showMessage, clearMessage, showLandingScore, hideLandingScore } from './hud.js';
 import { preLandingVS } from './physics.js';
 import { playTouchdownSound, playCrashSound } from './audio.js';
@@ -17,6 +19,8 @@ import {
   MAX_LANDING_SPEED,
   MS_TO_FPM,
 } from './constants.js';
+import { getActiveChallenge, getChallengeState, getCrosswindScoreKey, getDailyScoreKey, getEngineOutScoreKey } from './challenges.js';
+import { saveBestScore } from './settings.js';
 
 export const FlightState = {
   GROUNDED: 'GROUNDED',
@@ -45,7 +49,7 @@ export function resetState() {
   if (isLandingMode()) {
     resetLandingMode();
     // If approach spawn, start airborne
-    if (!aircraftState.onGround) {
+    if (!getActiveVehicle().onGround) {
       currentState = FlightState.AIRBORNE;
       wasAirborne = true;
     }
@@ -53,7 +57,7 @@ export function resetState() {
 }
 
 export function updateGameState(dt) {
-  const state = aircraftState;
+  const state = getActiveVehicle();
 
   // Clear timed messages
   if (messageTimer > 0) {
@@ -61,6 +65,12 @@ export function updateGameState(dt) {
     if (messageTimer <= 0) {
       clearMessage();
     }
+  }
+
+  // Non-aircraft vehicles: always grounded, no crash/landing logic
+  if (!isAircraft(state)) {
+    currentState = FlightState.GROUNDED;
+    return currentState;
   }
 
   if (currentState === FlightState.CRASHED) {
@@ -72,6 +82,19 @@ export function updateGameState(dt) {
     const vs = Math.abs(preLandingVS);
     const onRwy = isOnRunway(state.position.x, state.position.z);
 
+    const onWater = isInOcean(state.position.x, state.position.z);
+    const isSeaplane = state.config && state.config.isSeaplane;
+
+    // Seaplane on water: always succeed — no crash possible
+    if (onWater && isSeaplane) {
+      currentState = FlightState.GROUNDED;
+      playTouchdownSound(Math.min(vs, 2));
+      triggerLandingShake(Math.min(vs, 1.5));
+      showTimedMessage('WATER LANDING', 3);
+      wasAirborne = false;
+      return currentState;
+    }
+
     if (!state.gear) {
       crash('GEAR UP LANDING - PRESS R TO RETRY');
       playCrashSound();
@@ -79,7 +102,11 @@ export function updateGameState(dt) {
       if (isLandingMode()) {
         recordTouchdown(preLandingVS, state.speed);
       }
-    } else if (!onRwy) {
+    } else if (onWater && !isSeaplane) {
+      crash('WATER IMPACT - PRESS R TO RETRY');
+      playCrashSound();
+      triggerLandingShake(3);
+    } else if (!onRwy && !onWater) {
       crash('TERRAIN IMPACT - PRESS R TO RETRY');
       playCrashSound();
       triggerLandingShake(3);
@@ -109,6 +136,16 @@ export function updateGameState(dt) {
         if (score) {
           showLandingScore(score);
           showTimedMessage(`GRADE: ${score.overall.grade} - ${score.vs.grade}!`, 8);
+          // Save challenge-specific scores
+          const ch = getActiveChallenge();
+          const cs = getChallengeState();
+          if (ch === 'crosswind' && cs.level) {
+            saveBestScore(getCrosswindScoreKey(state.currentType, cs.level), score.overall.score);
+          } else if (ch === 'daily') {
+            saveBestScore(getDailyScoreKey(state.currentType), score.overall.score);
+          } else if (ch === 'engine_out') {
+            saveBestScore(getEngineOutScoreKey(state.currentType), score.overall.score);
+          }
         }
       } else {
         let quality;
@@ -143,8 +180,8 @@ export function updateGameState(dt) {
 
 function crash(msg) {
   currentState = FlightState.CRASHED;
-  aircraftState.velocity.set(0, 0, 0);
-  aircraftState.throttle = 0;
+  getActiveVehicle().velocity.set(0, 0, 0);
+  getActiveVehicle().throttle = 0;
   showMessage(msg);
 }
 

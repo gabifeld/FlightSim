@@ -1,13 +1,14 @@
 import * as THREE from 'three';
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle } from './vehicleState.js';
 import { getKeys } from './controls.js';
-import { getTerrainHeight } from './terrain.js';
+import { getGroundLevel, isInOcean } from './terrain.js';
 import { getWeatherState } from './weather.js';
 import { clamp } from './utils.js';
 import { getGamepadState, isGamepadConnected } from './gamepad.js';
 import { getMobileState, isMobileActive } from './mobile.js';
 import { isLandingAssistActive, updateLandingAssist } from './landing.js';
 import { isAPEngaged, getAPState, updateAutopilot } from './autopilot.js';
+import { isEngineFailed } from './challenges.js';
 import {
   GRAVITY,
   AIR_DENSITY,
@@ -47,6 +48,19 @@ const _up = new THREE.Vector3();
 const _right = new THREE.Vector3();
 const _tempQ = new THREE.Quaternion();
 const _worldUp = new THREE.Vector3(0, 1, 0);
+const _relativeVelocity = new THREE.Vector3();
+const _velDir = new THREE.Vector3();
+const _lift = new THREE.Vector3();
+const _drag = new THREE.Vector3();
+const _thrust = new THREE.Vector3();
+const _gravity = new THREE.Vector3();
+const _totalForce = new THREE.Vector3();
+const _accel = new THREE.Vector3();
+const _friction = new THREE.Vector3();
+const _groundForward = new THREE.Vector3();
+const _headingForward = new THREE.Vector3();
+const _euler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _euler2 = new THREE.Euler(0, 0, 0, 'YXZ');
 
 function getLocalAxes(quat) {
   _forward.set(0, 0, -1).applyQuaternion(quat).normalize();
@@ -56,7 +70,7 @@ function getLocalAxes(quat) {
 
 // Read physics constant from per-aircraft config or fall back to global constant
 function cfg(key, fallback) {
-  const c = aircraftState.config;
+  const c = getActiveVehicle().config;
   if (c && c[key] !== undefined) return c[key];
   return fallback;
 }
@@ -66,14 +80,16 @@ let smoothedAoa = 0;
 export let preLandingVS = 0;
 
 export function updatePhysics(dt) {
-  const state = aircraftState;
+  const state = getActiveVehicle();
   const keys = getKeys();
   const weather = getWeatherState();
+  const mobileActive = isMobileActive();
+  const mobileState = mobileActive ? getMobileState() : null;
 
   getLocalAxes(state.quaternion);
 
   // Use relative airspeed (velocity - wind) for aerodynamic calculations
-  const relativeVelocity = state.velocity.clone().sub(weather.windVector);
+  const relativeVelocity = _relativeVelocity.copy(state.velocity).sub(weather.windVector);
   const speed = relativeVelocity.length();
   state.speed = state.velocity.length(); // groundspeed for display
 
@@ -114,8 +130,8 @@ export function updatePhysics(dt) {
   }
 
   // Merge mobile tilt/touch inputs
-  if (isMobileActive()) {
-    const mob = getMobileState();
+  if (mobileActive && mobileState) {
+    const mob = mobileState;
     pitchInput = clamp(pitchInput + mob.pitchInput, -1, 1);
     rollInput = clamp(rollInput + mob.rollInput, -1, 1);
     yawInput = clamp(yawInput + mob.yawInput, -1, 1);
@@ -167,12 +183,12 @@ export function updatePhysics(dt) {
 
     state.quaternion.normalize();
 
-    const euler = new THREE.Euler().setFromQuaternion(state.quaternion, 'YXZ');
-    euler.z *= Math.max(0, 1 - 10 * dt);
-    euler.x = clamp(euler.x, -0.25, 0.08);
-    state.quaternion.setFromEuler(euler);
+    _euler.setFromQuaternion(state.quaternion, 'YXZ');
+    _euler.z *= Math.max(0, 1 - 10 * dt);
+    _euler.x = clamp(_euler.x, -0.25, 0.08);
+    state.quaternion.setFromEuler(_euler);
   } else {
-    const euler = new THREE.Euler().setFromQuaternion(state.quaternion, 'YXZ');
+    _euler.setFromQuaternion(state.quaternion, 'YXZ');
 
     const stallControlPenalty = 1 - stallFactor * 0.6;
 
@@ -181,7 +197,7 @@ export function updatePhysics(dt) {
     let yawDelta = yawInput * yRate * authority * stallControlPenalty * dt;
 
     const speedFactor = clamp(speed / takeoffSpd, 0.2, 1.5);
-    yawDelta -= Math.sin(euler.z) * BANK_TO_YAW * speedFactor * authority * dt;
+    yawDelta -= Math.sin(_euler.z) * BANK_TO_YAW * speedFactor * authority * dt;
     yawDelta += rollInput * ADVERSE_YAW * authority * dt;
 
     // Stall effects
@@ -217,12 +233,12 @@ export function updatePhysics(dt) {
     state.quaternion.premultiply(_tempQ);
 
     if (pitchInput === 0) {
-      const pitchDamp = -euler.x * PITCH_DAMPING * authority * dt;
+      const pitchDamp = -_euler.x * PITCH_DAMPING * authority * dt;
       _tempQ.setFromAxisAngle(_right, clamp(pitchDamp, -0.05, 0.05));
       state.quaternion.premultiply(_tempQ);
     }
     if (rollInput === 0 && !isStalling) {
-      const rollDamp = -euler.z * ROLL_DAMPING * authority * dt;
+      const rollDamp = -_euler.z * ROLL_DAMPING * authority * dt;
       _tempQ.setFromAxisAngle(_forward, clamp(rollDamp, -0.05, 0.05));
       state.quaternion.premultiply(_tempQ);
     }
@@ -230,8 +246,8 @@ export function updatePhysics(dt) {
     // Weathervane / sideslip damping - vertical stabilizer aligns nose with velocity
     // This eliminates the "drifting" feel in turns
     if (speed > 5) {
-      const velDir = relativeVelocity.clone().normalize();
-      const sideSlip = _right.dot(velDir);
+      _velDir.copy(relativeVelocity).normalize();
+      const sideSlip = _right.dot(_velDir);
       const slipCorrection = sideSlip * YAW_DAMPING * authority * dt;
       _tempQ.setFromAxisAngle(_worldUp, -slipCorrection);
       state.quaternion.premultiply(_tempQ);
@@ -245,9 +261,9 @@ export function updatePhysics(dt) {
   // Angle of Attack (relative to airspeed, not groundspeed)
   let rawAoa = 0;
   if (speed > 1) {
-    const velDir = relativeVelocity.clone().normalize();
-    const dotFwd = _forward.dot(velDir);
-    const dotUp = _up.dot(velDir);
+    _velDir.copy(relativeVelocity).normalize();
+    const dotFwd = _forward.dot(_velDir);
+    const dotUp = _up.dot(_velDir);
     rawAoa = Math.atan2(-dotUp, dotFwd);
   }
   // Smooth AoA to prevent brief turbulence/input spikes from triggering stalls
@@ -279,7 +295,7 @@ export function updatePhysics(dt) {
   }
 
   const liftMag = dynamicPressure * wingArea * Cl * groundEffectLift;
-  const lift = _up.clone().multiplyScalar(liftMag);
+  const lift = _lift.copy(_up).multiplyScalar(liftMag);
 
   // Drag
   let Cd = CD_PARASITIC + CD_INDUCED_FACTOR * Cl * Cl * groundEffectDrag;
@@ -287,8 +303,8 @@ export function updatePhysics(dt) {
   if (state.flaps) Cd += CD_FLAP_PENALTY;
   if (state.speedbrake) Cd += CD_SPEEDBRAKE_PENALTY;
 
-  const euler = new THREE.Euler().setFromQuaternion(state.quaternion, 'YXZ');
-  const bankAngle = Math.abs(euler.z);
+  _euler2.setFromQuaternion(state.quaternion, 'YXZ');
+  const bankAngle = Math.abs(_euler2.z);
   if (bankAngle > 0.05 && !state.onGround) {
     const loadFactor = 1 / Math.max(Math.cos(bankAngle), 0.3);
     const turnDrag = (loadFactor - 1) * TURN_DRAG_FACTOR * CD_PARASITIC;
@@ -301,28 +317,40 @@ export function updatePhysics(dt) {
 
   const dragMag = dynamicPressure * wingArea * Cd;
   const drag = speed > 0.1
-    ? relativeVelocity.clone().normalize().multiplyScalar(-dragMag)
-    : new THREE.Vector3();
+    ? _drag.copy(relativeVelocity).normalize().multiplyScalar(-dragMag)
+    : _drag.set(0, 0, 0);
 
   // Thrust
-  const thrustMag = state.throttle * maxThrust;
-  const thrust = _forward.clone().multiplyScalar(thrustMag);
+  const thrustMag = isEngineFailed() ? 0 : state.throttle * maxThrust;
+  const thrust = _thrust.copy(_forward).multiplyScalar(thrustMag);
 
   // Gravity
-  const gravity = new THREE.Vector3(0, -GRAVITY * mass, 0);
+  const gravity = _gravity.set(0, -GRAVITY * mass, 0);
 
   // Total force
-  const totalForce = new THREE.Vector3();
-  totalForce.add(thrust).add(drag).add(lift).add(gravity);
+  const totalForce = _totalForce.copy(thrust).add(drag).add(lift).add(gravity);
 
   // Ground friction
   if (state.onGround) {
-    const isBraking = keys[' '] || (isMobileActive() && getMobileState().brakeActive);
-    if (state.speed > 0.1) {
-      const frictionCoeff = isBraking ? BRAKE_FRICTION : GROUND_FRICTION;
-      const frictionMag = frictionCoeff * mass * GRAVITY;
-      const friction = state.velocity.clone().normalize().multiplyScalar(-frictionMag);
-      totalForce.add(friction);
+    const onWater = isInOcean(state.position.x, state.position.z);
+    const isSeaplane = state.config && state.config.isSeaplane;
+    const isBraking = keys[' '] || (mobileActive && mobileState && mobileState.brakeActive);
+
+    if (onWater && isSeaplane) {
+      // Water drag: moderate hull friction + gentle speed-dependent resistance
+      if (state.speed > 0.1) {
+        const waterDrag = 0.08 * mass * GRAVITY + state.speed * state.speed * mass * 0.0004;
+        const brakeDrag = isBraking ? 0.3 * mass * GRAVITY : 0;
+        const friction = _friction.copy(state.velocity).normalize().multiplyScalar(-(waterDrag + brakeDrag));
+        totalForce.add(friction);
+      }
+    } else {
+      if (state.speed > 0.1) {
+        const frictionCoeff = isBraking ? BRAKE_FRICTION : GROUND_FRICTION;
+        const frictionMag = frictionCoeff * mass * GRAVITY;
+        const friction = _friction.copy(state.velocity).normalize().multiplyScalar(-frictionMag);
+        totalForce.add(friction);
+      }
     }
 
     if (totalForce.y < 0) {
@@ -331,7 +359,7 @@ export function updatePhysics(dt) {
   }
 
   // Integration
-  const accel = totalForce.clone().divideScalar(mass);
+  const accel = _accel.copy(totalForce).divideScalar(mass);
 
   // G-force calculation
   state.gForce = 1 + accel.dot(_up) / GRAVITY;
@@ -342,7 +370,7 @@ export function updatePhysics(dt) {
   preLandingVS = state.velocity.y;
 
   // Ground collision
-  const groundHeight = getTerrainHeight(state.position.x, state.position.z);
+  const groundHeight = getGroundLevel(state.position.x, state.position.z);
   const wheelHeight = 1.5;
   const groundLevel = groundHeight + wheelHeight;
 
@@ -357,7 +385,7 @@ export function updatePhysics(dt) {
       state.velocity.y = 0;
     }
 
-    const groundForward = _forward.clone();
+    const groundForward = _groundForward.copy(_forward);
     groundForward.y = 0;
     if (groundForward.lengthSq() > 0.001) {
       groundForward.normalize();
@@ -380,7 +408,7 @@ export function updatePhysics(dt) {
   state.altitudeAGL = state.position.y - groundHeight;
   state.verticalSpeed = state.velocity.y;
 
-  const headingForward = _forward.clone();
+  const headingForward = _headingForward.copy(_forward);
   headingForward.y = 0;
   if (headingForward.lengthSq() > 0.001) {
     headingForward.normalize();

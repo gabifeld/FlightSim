@@ -1,6 +1,6 @@
 // Ground Proximity Warning System + altitude callouts
 
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { isOnRunway } from './runway.js';
 import { M_TO_FEET, MS_TO_FPM } from './constants.js';
 import { getSetting } from './settings.js';
@@ -71,7 +71,7 @@ export function updateGPWS(dt) {
     return;
   }
 
-  const state = aircraftState;
+  const state = getActiveVehicle();
   const aglFt = state.altitudeAGL * M_TO_FEET;
   const vsFPM = state.verticalSpeed * MS_TO_FPM;
 

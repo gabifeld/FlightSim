@@ -1,6 +1,6 @@
 // Flight replay system with ring buffer recording + playback
 import * as THREE from 'three';
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle } from './vehicleState.js';
 import { setReplayCameraMode } from './camera.js';
 
 const FPS = 15;                       // Recording framerate
@@ -25,6 +25,20 @@ let playPaused = false;
 
 // Saved state for restore after replay
 let savedState = null;
+const _frameA = {
+  position: new THREE.Vector3(),
+  quaternion: new THREE.Quaternion(),
+  velocity: new THREE.Vector3(),
+  throttle: 0,
+  flags: 0,
+};
+const _frameB = {
+  position: new THREE.Vector3(),
+  quaternion: new THREE.Quaternion(),
+  velocity: new THREE.Vector3(),
+  throttle: 0,
+  flags: 0,
+};
 
 function init() {
   buffer = new ArrayBuffer(MAX_FRAMES * FRAME_SIZE);
@@ -37,7 +51,7 @@ function init() {
 // Write a frame: position(12) + quaternion(16) + velocity(12) + throttle(4) + flags(2) = 46 bytes
 function writeFrame() {
   const offset = writeIndex * FRAME_SIZE;
-  const s = aircraftState;
+  const s = getActiveVehicle();
 
   // Position (3 floats = 12 bytes)
   view.setFloat32(offset, s.position.x, true);
@@ -70,30 +84,29 @@ function writeFrame() {
   if (frameCount < MAX_FRAMES) frameCount++;
 }
 
-function readFrame(index) {
+function readFrameInto(index, out) {
   const actualIndex = (writeIndex - frameCount + index + MAX_FRAMES) % MAX_FRAMES;
   const offset = actualIndex * FRAME_SIZE;
 
-  return {
-    position: new THREE.Vector3(
-      view.getFloat32(offset, true),
-      view.getFloat32(offset + 4, true),
-      view.getFloat32(offset + 8, true)
-    ),
-    quaternion: new THREE.Quaternion(
-      view.getFloat32(offset + 12, true),
-      view.getFloat32(offset + 16, true),
-      view.getFloat32(offset + 20, true),
-      view.getFloat32(offset + 24, true)
-    ),
-    velocity: new THREE.Vector3(
-      view.getFloat32(offset + 28, true),
-      view.getFloat32(offset + 32, true),
-      view.getFloat32(offset + 36, true)
-    ),
-    throttle: view.getFloat32(offset + 40, true),
-    flags: view.getUint16(offset + 44, true),
-  };
+  out.position.set(
+    view.getFloat32(offset, true),
+    view.getFloat32(offset + 4, true),
+    view.getFloat32(offset + 8, true)
+  );
+  out.quaternion.set(
+    view.getFloat32(offset + 12, true),
+    view.getFloat32(offset + 16, true),
+    view.getFloat32(offset + 20, true),
+    view.getFloat32(offset + 24, true)
+  );
+  out.velocity.set(
+    view.getFloat32(offset + 28, true),
+    view.getFloat32(offset + 32, true),
+    view.getFloat32(offset + 36, true)
+  );
+  out.throttle = view.getFloat32(offset + 40, true);
+  out.flags = view.getUint16(offset + 44, true);
+  return out;
 }
 
 export function initReplay() {
@@ -116,14 +129,14 @@ export function startReplay() {
 
   // Save current state
   savedState = {
-    position: aircraftState.position.clone(),
-    quaternion: aircraftState.quaternion.clone(),
-    velocity: aircraftState.velocity.clone(),
-    throttle: aircraftState.throttle,
-    gear: aircraftState.gear,
-    flaps: aircraftState.flaps,
-    speedbrake: aircraftState.speedbrake,
-    onGround: aircraftState.onGround,
+    position: getActiveVehicle().position.clone(),
+    quaternion: getActiveVehicle().quaternion.clone(),
+    velocity: getActiveVehicle().velocity.clone(),
+    throttle: getActiveVehicle().throttle,
+    gear: getActiveVehicle().gear,
+    flaps: getActiveVehicle().flaps,
+    speedbrake: getActiveVehicle().speedbrake,
+    onGround: getActiveVehicle().onGround,
   };
 
   playing = true;
@@ -141,14 +154,14 @@ export function stopReplay() {
 
   // Restore saved state
   if (savedState) {
-    aircraftState.position.copy(savedState.position);
-    aircraftState.quaternion.copy(savedState.quaternion);
-    aircraftState.velocity.copy(savedState.velocity);
-    aircraftState.throttle = savedState.throttle;
-    aircraftState.gear = savedState.gear;
-    aircraftState.flaps = savedState.flaps;
-    aircraftState.speedbrake = savedState.speedbrake;
-    aircraftState.onGround = savedState.onGround;
+    getActiveVehicle().position.copy(savedState.position);
+    getActiveVehicle().quaternion.copy(savedState.quaternion);
+    getActiveVehicle().velocity.copy(savedState.velocity);
+    getActiveVehicle().throttle = savedState.throttle;
+    getActiveVehicle().gear = savedState.gear;
+    getActiveVehicle().flaps = savedState.flaps;
+    getActiveVehicle().speedbrake = savedState.speedbrake;
+    getActiveVehicle().onGround = savedState.onGround;
     savedState = null;
   }
 }
@@ -179,27 +192,27 @@ export function updateReplay(dt) {
 
   // Interpolate between current and next frame
   const t = playTimer / RECORD_INTERVAL;
-  const frame = readFrame(playIndex);
+  const frame = readFrameInto(playIndex, _frameA);
   const nextIdx = Math.min(playIndex + 1, frameCount - 1);
-  const nextFrame = readFrame(nextIdx);
+  const nextFrame = readFrameInto(nextIdx, _frameB);
 
   // Lerp position
-  aircraftState.position.lerpVectors(frame.position, nextFrame.position, t);
+  getActiveVehicle().position.lerpVectors(frame.position, nextFrame.position, t);
 
   // Slerp quaternion
-  aircraftState.quaternion.copy(frame.quaternion).slerp(nextFrame.quaternion, t);
+  getActiveVehicle().quaternion.copy(frame.quaternion).slerp(nextFrame.quaternion, t);
 
   // Lerp velocity
-  aircraftState.velocity.lerpVectors(frame.velocity, nextFrame.velocity, t);
+  getActiveVehicle().velocity.lerpVectors(frame.velocity, nextFrame.velocity, t);
 
   // Throttle
-  aircraftState.throttle = frame.throttle + (nextFrame.throttle - frame.throttle) * t;
+  getActiveVehicle().throttle = frame.throttle + (nextFrame.throttle - frame.throttle) * t;
 
   // Flags from current frame
-  aircraftState.gear = !!(frame.flags & 1);
-  aircraftState.flaps = !!(frame.flags & 2);
-  aircraftState.speedbrake = !!(frame.flags & 4);
-  aircraftState.onGround = !!(frame.flags & 8);
+  getActiveVehicle().gear = !!(frame.flags & 1);
+  getActiveVehicle().flaps = !!(frame.flags & 2);
+  getActiveVehicle().speedbrake = !!(frame.flags & 4);
+  getActiveVehicle().onGround = !!(frame.flags & 8);
 }
 
 export function setReplaySpeed(speed) {

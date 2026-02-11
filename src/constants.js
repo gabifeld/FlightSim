@@ -33,7 +33,7 @@ export const MAX_LANDING_VS = 3.0; // m/s vertical
 export const MAX_LANDING_SPEED = 80; // m/s
 
 // Terrain
-export const TERRAIN_SIZE = 30000; // meters
+export const TERRAIN_SIZE = 50000; // meters
 export const TERRAIN_SEGMENTS = 384;
 export const TERRAIN_MAX_HEIGHT = 400; // meters
 
@@ -52,7 +52,7 @@ export const CHASE_HEIGHT = 10;
 export const CHASE_LERP_SPEED = 3.0;
 export const COCKPIT_OFFSET_Y = 2.0;
 export const COCKPIT_OFFSET_Z = -2.0;
-export const CAMERA_FAR = 50000;
+export const CAMERA_FAR = 80000;
 
 // Conversions
 export const MS_TO_KNOTS = 1.94384;
@@ -105,3 +105,11 @@ export const TIME_CYCLE_RATE = 1.0; // hours per 60 real seconds
 export const CITY_CENTER_X = 4000;
 export const CITY_CENTER_Z = -4000;
 export const CITY_SIZE = 2000;
+
+// Coastline / Ocean
+export const COAST_LINE_X = 13000; // x-coordinate where coastline runs
+export const OCEAN_DEPTH = 40; // max depth below sea level
+export const COAST_MARGIN = 800; // transition zone width
+export const BEACH_CENTER_Z = -2000; // z-center of the main beach area
+export const SEAPLANE_X = 15000; // seaplane position (well past coastline + noise)
+export const SEAPLANE_Z = -2000;

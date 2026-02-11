@@ -1,7 +1,7 @@
 // Night runway/taxiway lighting with InstancedMesh + light pooling + Points glow
 import * as THREE from 'three';
 import { RUNWAY_LENGTH, RUNWAY_WIDTH, AIRPORT2_X, AIRPORT2_Z } from './constants.js';
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle } from './vehicleState.js';
 
 let lightPool = [];          // Reusable PointLights
 let fixturePositions = [];   // All light fixture positions
@@ -280,8 +280,8 @@ export function updateAirportLights(dt) {
 
   // Pool PointLights: position on nearest fixtures to aircraft
   if (nightMode) {
-    const ax = aircraftState.position.x;
-    const az = aircraftState.position.z;
+    const ax = getActiveVehicle().position.x;
+    const az = getActiveVehicle().position.z;
 
     // Only re-sort when aircraft moves significantly or every 30 frames
     sortFrameCounter++;

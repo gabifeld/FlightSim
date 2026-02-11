@@ -2,6 +2,7 @@
 import { getSetting, setSetting } from './settings.js';
 import { setMasterVolume } from './audio.js';
 import { setTimeOfDay, getTimeOfDay } from './scene.js';
+import { applyGraphicsQuality } from './graphics.js';
 
 // Helper: listen for both click and touchend to ensure mobile compatibility.
 // Prevents double-fire by consuming the event on touchend.
@@ -46,6 +47,9 @@ export function initMenu() {
     todSlider: document.getElementById('setting-tod'),
     todValue: document.getElementById('setting-tod-value'),
     gpwsToggle: document.getElementById('setting-gpws'),
+    // Graphics + FPS
+    graphicsSelect: document.getElementById('setting-graphics'),
+    fpsToggle: document.getElementById('setting-fps'),
     // Back buttons
     btnSettingsBack: document.getElementById('settings-back'),
     btnControlsBack: document.getElementById('controls-back'),
@@ -122,6 +126,24 @@ export function initMenu() {
     els.gpwsToggle.checked = getSetting('gpwsEnabled');
     els.gpwsToggle.addEventListener('change', () => {
       setSetting('gpwsEnabled', els.gpwsToggle.checked);
+    });
+  }
+
+  if (els.graphicsSelect) {
+    els.graphicsSelect.value = getSetting('graphicsQuality');
+    els.graphicsSelect.addEventListener('change', () => {
+      const level = els.graphicsSelect.value;
+      setSetting('graphicsQuality', level);
+      applyGraphicsQuality(level);
+    });
+  }
+
+  if (els.fpsToggle) {
+    els.fpsToggle.checked = getSetting('showFPS');
+    els.fpsToggle.addEventListener('change', () => {
+      setSetting('showFPS', els.fpsToggle.checked);
+      const fpsEl = document.getElementById('perf-overlay');
+      if (fpsEl) fpsEl.style.display = els.fpsToggle.checked ? 'block' : 'none';
     });
   }
 

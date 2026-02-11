@@ -13,15 +13,36 @@ import {
   CITY_CENTER_X,
   CITY_CENTER_Z,
   CITY_SIZE,
+  COAST_LINE_X,
+  OCEAN_DEPTH,
+  COAST_MARGIN,
 } from './constants.js';
 import { smoothstep } from './utils.js';
 import { getSunDirection } from './scene.js';
+import { getSetting, isSettingExplicit } from './settings.js';
 
 const simplex = new SimplexNoise();
 
 // Module-level highway spline for external access
 let highwayCurve = null;
 let highwaySamplePoints = null;
+
+// Highway corridor centerline (x, z pairs) for terrain flattening and road mesh
+const HIGHWAY_CENTERLINE = [
+  [0, -300],
+  [-300, -900],
+  [200, -1700],
+  [1400, -2000],
+  [2600, -2400],
+  [3200, -3200],
+  [CITY_CENTER_X, CITY_CENTER_Z],
+  [5000, -4200],
+  [6000, -5000],
+  [6200, -6200],
+  [7000, -7000],
+  [7600, -7400],
+  [AIRPORT2_X, AIRPORT2_Z + 200],
+];
 
 function sampleNoise(x, z) {
   let value = 0;
@@ -37,7 +58,7 @@ function sampleNoise(x, z) {
 
 function airportFlattenFactor(x, z, cx, cz) {
   const halfLen = RUNWAY_LENGTH / 2 + 200;
-  const halfWid = RUNWAY_WIDTH / 2 + 250;
+  const halfWid = RUNWAY_WIDTH / 2 + 350;
   const margin = RUNWAY_FLATTEN_RADIUS;
 
   const lx = x - cx;
@@ -76,21 +97,64 @@ function cityFlattenFactor(x, z) {
   return 1 - smoothstep(0, margin, dist);
 }
 
+function highwayFlattenFactor(x, z) {
+  const roadHalfWidth = 20;
+  const margin = 40;
+  let minDist = Infinity;
+  for (let i = 0; i < HIGHWAY_CENTERLINE.length - 1; i++) {
+    const ax = HIGHWAY_CENTERLINE[i][0], az = HIGHWAY_CENTERLINE[i][1];
+    const bx = HIGHWAY_CENTERLINE[i + 1][0], bz = HIGHWAY_CENTERLINE[i + 1][1];
+    const dx = bx - ax, dz = bz - az;
+    const lenSq = dx * dx + dz * dz;
+    const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lenSq));
+    const px = ax + t * dx, pz = az + t * dz;
+    const dist = Math.sqrt((x - px) * (x - px) + (z - pz) * (z - pz));
+    if (dist < minDist) minDist = dist;
+  }
+  return (1 - smoothstep(0, margin, Math.max(0, minDist - roadHalfWidth))) * 0.7;
+}
+
 function runwayFlattenFactor(x, z) {
   // Airport 1 at origin
   const f1 = airportFlattenFactor(x, z, 0, 0);
   // Airport 2
   const f2 = airportFlattenFactor(x, z, AIRPORT2_X, AIRPORT2_Z);
   const f3 = cityFlattenFactor(x, z);
-  return Math.max(f1, f2, f3);
+  const f4 = highwayFlattenFactor(x, z);
+  return Math.max(f1, f2, f3, f4);
+}
+
+// Ocean depression — creates coastline along eastern edge of map
+function oceanFactor(x, z) {
+  // Wavy coastline using simplex noise for natural look
+  const coastNoise = simplex.noise(z * 0.00025, 0.5) * 1200
+    + simplex.noise(z * 0.0008, 1.7) * 400;
+  const effectiveCoastX = COAST_LINE_X + coastNoise;
+
+  // Smooth transition from land to ocean
+  return smoothstep(effectiveCoastX - COAST_MARGIN / 2, effectiveCoastX + COAST_MARGIN / 2, x);
 }
 
 export function getTerrainHeight(x, z) {
   const noise = sampleNoise(x, z);
   const rawHeight = ((noise + 1) / 2) * TERRAIN_MAX_HEIGHT;
   const flatten = runwayFlattenFactor(x, z);
+  const landHeight = rawHeight * (1 - flatten);
 
-  return rawHeight * (1 - flatten);
+  // Apply ocean depression east of coastline
+  const ocean = oceanFactor(x, z);
+  if (ocean <= 0) return landHeight;
+  return landHeight * (1 - ocean) - ocean * OCEAN_DEPTH;
+}
+
+export function isInOcean(x, z) {
+  return oceanFactor(x, z) > 0.5;
+}
+
+// Ground level for physics — terrain or water surface, whichever is higher
+const WATER_SURFACE_Y = -2;
+export function getGroundLevel(x, z) {
+  return Math.max(getTerrainHeight(x, z), WATER_SURFACE_Y);
 }
 
 function createGrassTexture() {
@@ -141,6 +205,167 @@ function createGrassTexture() {
   tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(200, 200);
   return tex;
+}
+
+function createDirtTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#6f5b3d';
+  ctx.fillRect(0, 0, 512, 512);
+
+  for (let i = 0; i < 15000; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const tone = 70 + Math.random() * 70;
+    ctx.fillStyle = `rgba(${tone + 10}, ${tone}, ${tone * 0.7}, ${0.08 + Math.random() * 0.2})`;
+    ctx.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 2);
+  }
+
+  for (let i = 0; i < 180; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const r = 8 + Math.random() * 26;
+    const c = 55 + Math.random() * 40;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, `rgba(${c + 15}, ${c + 8}, ${c * 0.55}, 0.35)`);
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 512, 512);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(130, 130);
+  return tex;
+}
+
+function createRockTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 512;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#676b70';
+  ctx.fillRect(0, 0, 512, 512);
+
+  for (let i = 0; i < 22000; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const tone = 80 + Math.random() * 90;
+    const alpha = 0.1 + Math.random() * 0.22;
+    ctx.fillStyle = `rgba(${tone}, ${tone + 4}, ${tone + 8}, ${alpha})`;
+    ctx.fillRect(x, y, 1 + Math.random() * 2, 1 + Math.random() * 2);
+  }
+
+  for (let i = 0; i < 140; i++) {
+    const x = Math.random() * 512;
+    const y = Math.random() * 512;
+    const w = 20 + Math.random() * 90;
+    const h = 4 + Math.random() * 14;
+    const a = Math.random() * Math.PI;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a);
+    const shade = 95 + Math.random() * 40;
+    ctx.fillStyle = `rgba(${shade}, ${shade}, ${shade + 8}, ${0.16 + Math.random() * 0.22})`;
+    ctx.fillRect(-w * 0.5, -h * 0.5, w, h);
+    ctx.restore();
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(85, 85);
+  return tex;
+}
+
+function applyBiomeTerrainShader(material, dirtMap, rockMap) {
+  material.customProgramCacheKey = () => 'terrain-biome-v3';
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.dirtMap = { value: dirtMap };
+    shader.uniforms.rockMap = { value: rockMap };
+    shader.uniforms.shoreLevel = { value: 2.4 };
+    shader.uniforms.shoreFade = { value: 4.8 };
+    shader.uniforms.biomeNoiseScale = { value: 0.0017 };
+
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;`
+      )
+      .replace(
+        '#include <worldpos_vertex>',
+        `#include <worldpos_vertex>
+vWorldPos = worldPosition.xyz;
+vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
+      );
+
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+uniform sampler2D dirtMap;
+uniform sampler2D rockMap;
+uniform float shoreLevel;
+uniform float shoreFade;
+uniform float biomeNoiseScale;
+varying vec3 vWorldPos;
+varying vec3 vWorldNormal;
+
+float hash21(vec2 p) {
+  p = fract(p * vec2(123.34, 456.21));
+  p += dot(p, p + 34.45);
+  return fract(p.x * p.y);
+}`
+      )
+      .replace(
+        '#include <map_fragment>',
+        `vec4 sampledDiffuseColor = texture2D(map, vMapUv);
+vec4 dirtColor = texture2D(dirtMap, vMapUv * 1.25);
+vec4 rockColor = texture2D(rockMap, vMapUv * 1.65);
+
+float h = vWorldPos.y;
+float slope = clamp(1.0 - abs(vWorldNormal.y), 0.0, 1.0);
+float shore = 1.0 - smoothstep(shoreLevel, shoreLevel + shoreFade, h);
+float lowland = 1.0 - smoothstep(120.0, 250.0, h);
+float highland = smoothstep(170.0, 300.0, h);
+float steepRock = smoothstep(0.52, 0.90, slope);
+float rockWeight = clamp(max(highland * 0.9, steepRock * 0.95), 0.0, 1.0);
+float dirtWeight = clamp(smoothstep(0.28, 0.62, slope) * (1.0 - rockWeight * 0.75) + shore * 0.3, 0.0, 1.0);
+float grassWeight = clamp(1.0 - rockWeight - dirtWeight, 0.0, 1.0);
+
+float n = hash21(floor(vWorldPos.xz * biomeNoiseScale));
+grassWeight *= mix(0.95, 1.18, n) * (0.9 + 0.22 * lowland);
+dirtWeight *= mix(0.82, 1.05, 1.0 - n);
+rockWeight *= mix(0.88, 1.12, n * n);
+float total = max(0.001, grassWeight + dirtWeight + rockWeight);
+grassWeight /= total;
+dirtWeight /= total;
+rockWeight /= total;
+
+vec3 terrainColor = sampledDiffuseColor.rgb * grassWeight +
+  dirtColor.rgb * dirtWeight +
+  rockColor.rgb * rockWeight;
+
+vec3 wetColor = terrainColor * vec3(0.72, 0.77, 0.81);
+terrainColor = mix(terrainColor, wetColor, shore * 0.45);
+
+float foamNoise = hash21(floor(vWorldPos.xz * 0.09 + vec2(17.0, 53.0)));
+float foam = smoothstep(0.82, 1.0, shore) * (0.2 + 0.8 * foamNoise);
+terrainColor = mix(terrainColor, vec3(0.88, 0.84, 0.73), foam * 0.08);
+
+float greenBoost = lowland * 0.12;
+terrainColor *= vec3(0.98 - greenBoost * 0.15, 1.0 + greenBoost, 0.97 - greenBoost * 0.2);
+
+diffuseColor *= vec4(terrainColor, sampledDiffuseColor.a);`
+      );
+  };
 }
 
 // Generate terrain normal map from height data
@@ -209,72 +434,21 @@ export function createTerrain() {
     const h = getTerrainHeight(x, z);
     posAttr.setY(i, h);
   }
-
-  // Add vertex colors based on height
-  const colors = new Float32Array(posAttr.count * 3);
-  const color = new THREE.Color();
-
-  for (let i = 0; i < posAttr.count; i++) {
-    const y = posAttr.getY(i);
-
-    if (y < 2) {
-      // Beach/shore - sandy color
-      color.setRGB(0.76, 0.70, 0.50);
-    } else if (y < 25) {
-      // Lowland - lush green
-      const t = (y - 2) / 23;
-      color.setRGB(
-        0.25 - t * 0.05,
-        0.50 + t * 0.05,
-        0.20 - t * 0.02
-      );
-    } else if (y < 80) {
-      // Midlands - forest green fading to olive
-      const t = (y - 25) / 55;
-      color.setRGB(
-        0.20 + t * 0.15,
-        0.45 - t * 0.08,
-        0.18 + t * 0.05
-      );
-    } else if (y < 180) {
-      // Highlands - brown/tan
-      const t = (y - 80) / 100;
-      color.setRGB(
-        0.45 + t * 0.10,
-        0.38 - t * 0.05,
-        0.25 - t * 0.03
-      );
-    } else {
-      // Mountain - gray rock (all high peaks)
-      const t = Math.max(0, Math.min(1, (y - 180) / 220));
-      color.setRGB(
-        0.50 + t * 0.08,
-        0.48 + t * 0.08,
-        0.45 + t * 0.10
-      );
-    }
-
-    // Add random variation for natural look
-    const noise = (Math.random() - 0.5) * 0.07;
-    colors[i * 3] = Math.max(0, Math.min(1, color.r + noise));
-    colors[i * 3 + 1] = Math.max(0, Math.min(1, color.g + noise));
-    colors[i * 3 + 2] = Math.max(0, Math.min(1, color.b + noise));
-  }
-
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
 
   const grassTex = createGrassTexture();
+  const dirtTex = createDirtTexture();
+  const rockTex = createRockTexture();
   const normalMap = createTerrainNormalMap(1);
 
   const material = new THREE.MeshStandardMaterial({
-    vertexColors: true,
     map: grassTex,
     normalMap: normalMap,
-    normalScale: new THREE.Vector2(0.3, 0.3),
-    roughness: 0.85,
+    normalScale: new THREE.Vector2(0.24, 0.24),
+    roughness: 0.88,
     metalness: 0.0,
   });
+  applyBiomeTerrainShader(material, dirtTex, rockTex);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;
@@ -306,54 +480,249 @@ function isNearRoad(x, z) {
   return false;
 }
 
-// Use InstancedMesh for much better tree performance
+const TREE_COLOR_PALETTE = [
+  new THREE.Color(0x2d6b1e),
+  new THREE.Color(0x3a8c25),
+  new THREE.Color(0x4a9a35),
+  new THREE.Color(0x2a5c1a),
+  new THREE.Color(0x557733),
+  new THREE.Color(0x6b8e23),
+  new THREE.Color(0x8faa3a),
+  new THREE.Color(0x7a9a2e),
+];
+
+const VEGETATION_DENSITY_PROFILE = {
+  low: { trees: 2500, bushes: 1600, deadTrees: 400, nearRadius: 900, midRadius: 2600, nearTreeCap: 700, nearBushCap: 450, nearDeadCap: 120, impostorCap: 1200 },
+  medium: { trees: 4200, bushes: 2600, deadTrees: 700, nearRadius: 1150, midRadius: 3200, nearTreeCap: 1200, nearBushCap: 700, nearDeadCap: 200, impostorCap: 2100 },
+  high: { trees: 6000, bushes: 4000, deadTrees: 1000, nearRadius: 1450, midRadius: 3900, nearTreeCap: 1800, nearBushCap: 1000, nearDeadCap: 320, impostorCap: 3200 },
+};
+
+const vegetationLodState = {
+  enabled: false,
+  nearRadius: 1200,
+  midRadius: 3200,
+  updateIntervalMs: 250,
+  lastUpdateMs: 0,
+  allTrees: [],
+  conifers: [],
+  deciduous: [],
+  bushes: [],
+  deadTrees: [],
+  trunkMesh: null,
+  coniferMesh: null,
+  deciduousMesh: null,
+  bushMesh: null,
+  deadMesh: null,
+  impostorPoints: null,
+  impostorPositions: null,
+  impostorColors: null,
+  impostorCapacity: 0,
+};
+
+const _vegDummy = new THREE.Object3D();
+const _treeImpostorColor = new THREE.Color(0x4b6542);
+const _bushColor = new THREE.Color(0x425b38);
+const _deadImpostorColor = new THREE.Color(0x675f50);
+
+function createVegetationMesh(geometry, material, count, castShadow = true) {
+  const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, count));
+  mesh.userData.maxCount = Math.max(1, count);
+  mesh.count = 0;
+  mesh.castShadow = castShadow;
+  mesh.frustumCulled = false;
+  return mesh;
+}
+
+function commitInstancedMesh(mesh, count, usesColor = false) {
+  mesh.count = count;
+  mesh.instanceMatrix.needsUpdate = true;
+  if (usesColor && mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+}
+
+function updateImpostorBuffer(focusX, focusZ, nearRadiusSq, midRadiusSq) {
+  const { allTrees, bushes, deadTrees, impostorPositions, impostorColors, impostorCapacity, impostorPoints } = vegetationLodState;
+  if (!impostorPoints || !impostorPositions || !impostorColors) return;
+
+  let count = 0;
+  const writeImpostor = (x, y, z, color) => {
+    if (count >= impostorCapacity) return;
+    const idx = count * 3;
+    impostorPositions[idx] = x;
+    impostorPositions[idx + 1] = y;
+    impostorPositions[idx + 2] = z;
+    impostorColors[idx] = color.r;
+    impostorColors[idx + 1] = color.g;
+    impostorColors[idx + 2] = color.b;
+    count++;
+  };
+
+  for (let i = 0; i < allTrees.length; i++) {
+    const t = allTrees[i];
+    const dx = t.x - focusX;
+    const dz = t.z - focusZ;
+    const distSq = dx * dx + dz * dz;
+    if (distSq <= nearRadiusSq || distSq > midRadiusSq) continue;
+    writeImpostor(t.x, t.h + t.scale * 1.6, t.z, _treeImpostorColor);
+    if (count >= impostorCapacity) break;
+  }
+
+  if (count < impostorCapacity) {
+    for (let i = 0; i < bushes.length && count < impostorCapacity; i++) {
+      const b = bushes[i];
+      const dx = b.x - focusX;
+      const dz = b.z - focusZ;
+      const distSq = dx * dx + dz * dz;
+      if (distSq <= nearRadiusSq || distSq > midRadiusSq) continue;
+      writeImpostor(b.x, b.h + b.scale * 0.55, b.z, _bushColor);
+    }
+  }
+
+  if (count < impostorCapacity) {
+    for (let i = 0; i < deadTrees.length && count < impostorCapacity; i++) {
+      const t = deadTrees[i];
+      const dx = t.x - focusX;
+      const dz = t.z - focusZ;
+      const distSq = dx * dx + dz * dz;
+      if (distSq <= nearRadiusSq || distSq > midRadiusSq) continue;
+      writeImpostor(t.x, t.h + t.scale * 1.1, t.z, _deadImpostorColor);
+    }
+  }
+
+  impostorPoints.geometry.setDrawRange(0, count);
+  impostorPoints.geometry.attributes.position.needsUpdate = true;
+  impostorPoints.geometry.attributes.color.needsUpdate = true;
+}
+
+export function updateVegetationLOD(focusX, focusZ) {
+  if (!vegetationLodState.enabled) return;
+
+  const now = performance.now();
+  if (now - vegetationLodState.lastUpdateMs < vegetationLodState.updateIntervalMs) return;
+  vegetationLodState.lastUpdateMs = now;
+
+  const nearRadiusSq = vegetationLodState.nearRadius * vegetationLodState.nearRadius;
+  const midRadiusSq = vegetationLodState.midRadius * vegetationLodState.midRadius;
+
+  let trunkCount = 0;
+  let coniferCount = 0;
+  let deciduousCount = 0;
+  const trunkCap = vegetationLodState.trunkMesh.userData.maxCount;
+  const coniferCap = vegetationLodState.coniferMesh.userData.maxCount;
+  const deciduousCap = vegetationLodState.deciduousMesh.userData.maxCount;
+
+  for (let i = 0; i < vegetationLodState.allTrees.length; i++) {
+    const t = vegetationLodState.allTrees[i];
+    const dx = t.x - focusX;
+    const dz = t.z - focusZ;
+    const distSq = dx * dx + dz * dz;
+    if (distSq > nearRadiusSq) continue;
+
+    if (trunkCount < trunkCap) {
+      _vegDummy.position.set(t.x, t.h + t.scale * 0.5, t.z);
+      _vegDummy.rotation.set(0, 0, 0);
+      _vegDummy.scale.setScalar(t.scale * 0.4);
+      _vegDummy.updateMatrix();
+      vegetationLodState.trunkMesh.setMatrixAt(trunkCount, _vegDummy.matrix);
+      trunkCount++;
+    }
+
+    if (t.type === 'conifer') {
+      if (coniferCount >= coniferCap) continue;
+      _vegDummy.position.set(t.x, t.h + t.scale * 1.8, t.z);
+      _vegDummy.rotation.set(0, 0, 0);
+      _vegDummy.scale.setScalar(t.scale * 0.5);
+      _vegDummy.updateMatrix();
+      vegetationLodState.coniferMesh.setMatrixAt(coniferCount, _vegDummy.matrix);
+      vegetationLodState.coniferMesh.setColorAt(coniferCount, t.color);
+      coniferCount++;
+    } else {
+      if (deciduousCount >= deciduousCap) continue;
+      _vegDummy.position.set(t.x, t.h + t.scale * 1.6, t.z);
+      _vegDummy.rotation.set(0, 0, 0);
+      _vegDummy.scale.set(t.scale * 0.5, t.scale * 0.4, t.scale * 0.5);
+      _vegDummy.updateMatrix();
+      vegetationLodState.deciduousMesh.setMatrixAt(deciduousCount, _vegDummy.matrix);
+      vegetationLodState.deciduousMesh.setColorAt(deciduousCount, t.color);
+      deciduousCount++;
+    }
+
+    if (trunkCount >= trunkCap && coniferCount >= coniferCap && deciduousCount >= deciduousCap) {
+      break;
+    }
+  }
+
+  commitInstancedMesh(vegetationLodState.trunkMesh, trunkCount);
+  commitInstancedMesh(vegetationLodState.coniferMesh, coniferCount, true);
+  commitInstancedMesh(vegetationLodState.deciduousMesh, deciduousCount, true);
+
+  let bushCount = 0;
+  const bushCap = vegetationLodState.bushMesh.userData.maxCount;
+  for (let i = 0; i < vegetationLodState.bushes.length; i++) {
+    const b = vegetationLodState.bushes[i];
+    const dx = b.x - focusX;
+    const dz = b.z - focusZ;
+    const distSq = dx * dx + dz * dz;
+    if (distSq > nearRadiusSq) continue;
+
+    _vegDummy.position.set(b.x, b.h + b.scale * 0.3, b.z);
+    _vegDummy.rotation.set(0, 0, 0);
+    _vegDummy.scale.set(b.scale, b.scale * 0.6, b.scale);
+    _vegDummy.updateMatrix();
+    vegetationLodState.bushMesh.setMatrixAt(bushCount, _vegDummy.matrix);
+    bushCount++;
+    if (bushCount >= bushCap) break;
+  }
+  commitInstancedMesh(vegetationLodState.bushMesh, bushCount);
+
+  let deadCount = 0;
+  const deadCap = vegetationLodState.deadMesh.userData.maxCount;
+  for (let i = 0; i < vegetationLodState.deadTrees.length; i++) {
+    const t = vegetationLodState.deadTrees[i];
+    const dx = t.x - focusX;
+    const dz = t.z - focusZ;
+    const distSq = dx * dx + dz * dz;
+    if (distSq > nearRadiusSq) continue;
+
+    _vegDummy.position.set(t.x, t.h + t.scale * 1.0, t.z);
+    _vegDummy.rotation.set(t.leanX, t.yaw, t.leanZ);
+    _vegDummy.scale.setScalar(t.scale * 0.5);
+    _vegDummy.updateMatrix();
+    vegetationLodState.deadMesh.setMatrixAt(deadCount, _vegDummy.matrix);
+    deadCount++;
+    if (deadCount >= deadCap) break;
+  }
+  commitInstancedMesh(vegetationLodState.deadMesh, deadCount);
+
+  updateImpostorBuffer(focusX, focusZ, nearRadiusSq, midRadiusSq);
+}
+
+// Use InstancedMesh with dynamic LOD around aircraft for better visual density at stable cost.
 export function createVegetation(scene) {
+  const densitySetting = isSettingExplicit('vegetationDensity') ? getSetting('vegetationDensity') : getSetting('graphicsQuality');
+  const vegetationProfile = VEGETATION_DENSITY_PROFILE[densitySetting] || VEGETATION_DENSITY_PROFILE.high;
   const treePositions = [];
 
-  // Tree canopy color palette - 8 shades including autumn touches
-  const treeColors = [
-    new THREE.Color(0x2d6b1e), // dark forest green
-    new THREE.Color(0x3a8c25), // standard green
-    new THREE.Color(0x4a9a35), // bright green
-    new THREE.Color(0x2a5c1a), // deep green
-    new THREE.Color(0x557733), // olive green
-    new THREE.Color(0x6b8e23), // yellow-green (olive drab)
-    new THREE.Color(0x8faa3a), // lime-green / autumn touch
-    new THREE.Color(0x7a9a2e), // golden-green / autumn touch
-  ];
-
-  // Gather valid positions for trees using noise-based clustering
   for (let i = 0; i < 9000; i++) {
     const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
-
-    // Skip airport areas, city, and roads
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
     if (isNearRoad(x, z)) continue;
 
     const h = getTerrainHeight(x, z);
-    // Trees avoid water (h > 3) and very high altitudes (h < 250)
     if (h > 250 || h < 3) continue;
 
-    // Noise-based density for forest patches
     const density = simplex.noise(x * 0.0008, z * 0.0008);
-    // Higher density = more likely to place a tree (creates forest patches)
     if (Math.random() > (density + 1) * 0.45) continue;
+    if (treePositions.length >= vegetationProfile.trees) break;
 
-    if (treePositions.length >= 6000) break;
-
-    // Dramatic size variation: 0.5x to 2.0x
-    const scale = 0.5 + Math.random() * 1.5;
-    // Density also influences size slightly (denser forests = taller trees)
+    const baseScale = 0.5 + Math.random() * 1.5;
     const sizeBoost = density > 0.3 ? 1.0 + (density - 0.3) * 0.5 : 1.0;
-    const finalScale = scale * sizeBoost;
-
     const type = Math.random() > 0.4 ? 'conifer' : 'deciduous';
-    treePositions.push({ x, z, h, scale: finalScale, type });
+    const color = TREE_COLOR_PALETTE[Math.floor(Math.random() * TREE_COLOR_PALETTE.length)];
+    treePositions.push({ x, z, h, scale: baseScale * sizeBoost, type, color });
   }
 
-  // Bush positions
   const bushPositions = [];
   for (let i = 0; i < 6000; i++) {
     const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
@@ -363,11 +732,10 @@ export function createVegetation(scene) {
     if (isNearRoad(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h > TERRAIN_MAX_HEIGHT * 0.35 || h < 3) continue;
-    if (bushPositions.length >= 4000) break;
+    if (bushPositions.length >= vegetationProfile.bushes) break;
     bushPositions.push({ x, z, h, scale: 0.5 + Math.random() * 1.0 });
   }
 
-  // Dead tree positions
   const deadTreePositions = [];
   for (let i = 0; i < 1500; i++) {
     const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
@@ -376,8 +744,16 @@ export function createVegetation(scene) {
     if (isInCityZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h > TERRAIN_MAX_HEIGHT * 0.55 || h < 3) continue;
-    if (deadTreePositions.length >= 1000) break;
-    deadTreePositions.push({ x, z, h, scale: 1.0 + Math.random() * 2.0 });
+    if (deadTreePositions.length >= vegetationProfile.deadTrees) break;
+    deadTreePositions.push({
+      x,
+      z,
+      h,
+      scale: 1.0 + Math.random() * 2.0,
+      leanX: (Math.random() - 0.5) * 0.2,
+      leanZ: (Math.random() - 0.5) * 0.2,
+      yaw: Math.random() * Math.PI * 2,
+    });
   }
 
   const conifers = treePositions.filter(t => t.type === 'conifer');
@@ -385,90 +761,72 @@ export function createVegetation(scene) {
 
   const trunkGeo = new THREE.CylinderGeometry(0.3, 0.5, 4, 6);
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5c3a1e });
-
   const coneGeo = new THREE.ConeGeometry(1.5, 4, 6);
   const coniferMat = new THREE.MeshLambertMaterial({ color: 0x2d6b1e });
-
   const sphereGeo = new THREE.SphereGeometry(1.8, 6, 5);
   const deciduousMat = new THREE.MeshLambertMaterial({ color: 0x3a8c25 });
-
-  const allTrees = treePositions;
-  const dummy = new THREE.Object3D();
-
-  // Instanced trunk mesh
-  const trunkInstanced = new THREE.InstancedMesh(trunkGeo, trunkMat, allTrees.length);
-  trunkInstanced.castShadow = true;
-
-  for (let i = 0; i < allTrees.length; i++) {
-    const t = allTrees[i];
-    dummy.position.set(t.x, t.h + t.scale * 0.5, t.z);
-    dummy.scale.setScalar(t.scale * 0.4);
-    dummy.updateMatrix();
-    trunkInstanced.setMatrixAt(i, dummy.matrix);
-  }
-  scene.add(trunkInstanced);
-
-  // Conifer canopy instances (with per-instance color)
-  const coniferInstanced = new THREE.InstancedMesh(coneGeo, coniferMat, conifers.length);
-  coniferInstanced.castShadow = true;
-  for (let i = 0; i < conifers.length; i++) {
-    const t = conifers[i];
-    dummy.position.set(t.x, t.h + t.scale * 1.8, t.z);
-    dummy.scale.setScalar(t.scale * 0.5);
-    dummy.updateMatrix();
-    coniferInstanced.setMatrixAt(i, dummy.matrix);
-    coniferInstanced.setColorAt(i, treeColors[Math.floor(Math.random() * treeColors.length)]);
-  }
-  coniferInstanced.instanceColor.needsUpdate = true;
-  scene.add(coniferInstanced);
-
-  // Deciduous canopy instances (with per-instance color)
-  const deciduousInstanced = new THREE.InstancedMesh(sphereGeo, deciduousMat, deciduous.length);
-  deciduousInstanced.castShadow = true;
-  for (let i = 0; i < deciduous.length; i++) {
-    const t = deciduous[i];
-    dummy.position.set(t.x, t.h + t.scale * 1.6, t.z);
-    dummy.scale.set(t.scale * 0.5, t.scale * 0.4, t.scale * 0.5);
-    dummy.updateMatrix();
-    deciduousInstanced.setMatrixAt(i, dummy.matrix);
-    deciduousInstanced.setColorAt(i, treeColors[Math.floor(Math.random() * treeColors.length)]);
-  }
-  deciduousInstanced.instanceColor.needsUpdate = true;
-  scene.add(deciduousInstanced);
-
-  // Bushes (low spheres)
   const bushGeo = new THREE.SphereGeometry(1.0, 5, 4);
   const bushMat = new THREE.MeshLambertMaterial({ color: 0x3a7a20 });
-  const bushInstanced = new THREE.InstancedMesh(bushGeo, bushMat, bushPositions.length);
-  bushInstanced.castShadow = true;
-  for (let i = 0; i < bushPositions.length; i++) {
-    const b = bushPositions[i];
-    dummy.position.set(b.x, b.h + b.scale * 0.3, b.z);
-    dummy.scale.set(b.scale, b.scale * 0.6, b.scale);
-    dummy.updateMatrix();
-    bushInstanced.setMatrixAt(i, dummy.matrix);
-  }
-  scene.add(bushInstanced);
-
-  // Dead trees (trunk only)
   const deadTrunkGeo = new THREE.CylinderGeometry(0.2, 0.4, 5, 5);
   const deadTrunkMat = new THREE.MeshLambertMaterial({ color: 0x8b7355 });
-  const deadInstanced = new THREE.InstancedMesh(deadTrunkGeo, deadTrunkMat, deadTreePositions.length);
+
+  const trunkInstanced = createVegetationMesh(trunkGeo, trunkMat, vegetationProfile.nearTreeCap);
+  const coniferInstanced = createVegetationMesh(coneGeo, coniferMat, vegetationProfile.nearTreeCap);
+  const deciduousInstanced = createVegetationMesh(sphereGeo, deciduousMat, vegetationProfile.nearTreeCap);
+  const bushInstanced = createVegetationMesh(bushGeo, bushMat, vegetationProfile.nearBushCap);
+  const deadInstanced = createVegetationMesh(deadTrunkGeo, deadTrunkMat, vegetationProfile.nearDeadCap);
+  trunkInstanced.castShadow = true;
+  coniferInstanced.castShadow = true;
+  deciduousInstanced.castShadow = true;
+  bushInstanced.castShadow = true;
   deadInstanced.castShadow = true;
-  for (let i = 0; i < deadTreePositions.length; i++) {
-    const t = deadTreePositions[i];
-    dummy.position.set(t.x, t.h + t.scale * 1.0, t.z);
-    dummy.scale.setScalar(t.scale * 0.5);
-    // Slight random lean
-    dummy.rotation.set(
-      (Math.random() - 0.5) * 0.2,
-      Math.random() * Math.PI * 2,
-      (Math.random() - 0.5) * 0.2
-    );
-    dummy.updateMatrix();
-    deadInstanced.setMatrixAt(i, dummy.matrix);
-  }
+
+  scene.add(trunkInstanced);
+  scene.add(coniferInstanced);
+  scene.add(deciduousInstanced);
+  scene.add(bushInstanced);
   scene.add(deadInstanced);
+
+  const impostorCapacity = vegetationProfile.impostorCap;
+  const impostorGeo = new THREE.BufferGeometry();
+  const impostorPositions = new Float32Array(impostorCapacity * 3);
+  const impostorColors = new Float32Array(impostorCapacity * 3);
+  impostorGeo.setAttribute('position', new THREE.BufferAttribute(impostorPositions, 3));
+  impostorGeo.setAttribute('color', new THREE.BufferAttribute(impostorColors, 3));
+  impostorGeo.setDrawRange(0, 0);
+
+  const impostorMat = new THREE.PointsMaterial({
+    size: densitySetting === 'low' ? 5 : (densitySetting === 'medium' ? 6.5 : 8),
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: true,
+  });
+  const impostorPoints = new THREE.Points(impostorGeo, impostorMat);
+  impostorPoints.frustumCulled = false;
+  scene.add(impostorPoints);
+
+  vegetationLodState.enabled = true;
+  vegetationLodState.nearRadius = vegetationProfile.nearRadius;
+  vegetationLodState.midRadius = vegetationProfile.midRadius;
+  vegetationLodState.lastUpdateMs = 0;
+  vegetationLodState.allTrees = treePositions;
+  vegetationLodState.conifers = conifers;
+  vegetationLodState.deciduous = deciduous;
+  vegetationLodState.bushes = bushPositions;
+  vegetationLodState.deadTrees = deadTreePositions;
+  vegetationLodState.trunkMesh = trunkInstanced;
+  vegetationLodState.coniferMesh = coniferInstanced;
+  vegetationLodState.deciduousMesh = deciduousInstanced;
+  vegetationLodState.bushMesh = bushInstanced;
+  vegetationLodState.deadMesh = deadInstanced;
+  vegetationLodState.impostorPoints = impostorPoints;
+  vegetationLodState.impostorPositions = impostorPositions;
+  vegetationLodState.impostorColors = impostorColors;
+  vegetationLodState.impostorCapacity = impostorCapacity;
+
+  updateVegetationLOD(0, 0);
 }
 
 // Rural structures (farmhouses and barns) scattered across terrain
@@ -492,7 +850,12 @@ export function createRuralStructures(scene) {
     if (isInCityZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h < 2 || h > TERRAIN_MAX_HEIGHT * 0.2) continue;
-    farmPositions.push({ x, z, h });
+    farmPositions.push({
+      x,
+      z,
+      h,
+      heading: Math.random() * Math.PI * 2,
+    });
   }
 
   // Farmhouses via InstancedMesh
@@ -504,7 +867,7 @@ export function createRuralStructures(scene) {
   for (let i = 0; i < farmPositions.length; i++) {
     const p = farmPositions[i];
     dummy.position.set(p.x, p.h + 2.5, p.z);
-    dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    dummy.rotation.set(0, p.heading, 0);
     dummy.scale.setScalar(1);
     dummy.updateMatrix();
     farmInstanced.setMatrixAt(i, dummy.matrix);
@@ -512,6 +875,28 @@ export function createRuralStructures(scene) {
   }
   if (farmPositions.length > 0) farmInstanced.instanceColor.needsUpdate = true;
   scene.add(farmInstanced);
+
+  // Farmhouse roof pass for stronger silhouette
+  const roofGeo = new THREE.ConeGeometry(6.4, 2.6, 4);
+  roofGeo.rotateY(Math.PI * 0.25);
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x7b4f30 });
+  const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, farmPositions.length);
+  const roofBaseColor = new THREE.Color(0x7b4f30);
+  const roofColor = new THREE.Color();
+  roofMesh.castShadow = true;
+  roofMesh.receiveShadow = true;
+  for (let i = 0; i < farmPositions.length; i++) {
+    const p = farmPositions[i];
+    dummy.position.set(p.x, p.h + 6.3, p.z);
+    dummy.rotation.set(0, p.heading, 0);
+    dummy.scale.set(1.0, 0.9 + Math.random() * 0.25, 1.0);
+    dummy.updateMatrix();
+    roofMesh.setMatrixAt(i, dummy.matrix);
+    roofColor.copy(roofBaseColor).multiplyScalar(0.85 + Math.random() * 0.3);
+    roofMesh.setColorAt(i, roofColor);
+  }
+  if (farmPositions.length > 0) roofMesh.instanceColor.needsUpdate = true;
+  scene.add(roofMesh);
 
   // Collect valid barn positions
   const barnPositions = [];
@@ -522,7 +907,12 @@ export function createRuralStructures(scene) {
     if (isInCityZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h < 2 || h > TERRAIN_MAX_HEIGHT * 0.2) continue;
-    barnPositions.push({ x, z, h });
+    barnPositions.push({
+      x,
+      z,
+      h,
+      heading: Math.random() * Math.PI * 2,
+    });
   }
 
   // Barns via InstancedMesh
@@ -532,49 +922,110 @@ export function createRuralStructures(scene) {
   barnInstanced.castShadow = true;
   barnInstanced.receiveShadow = true;
   const barnColor = new THREE.Color(0x8b4513);
+  const barnTint = new THREE.Color();
   for (let i = 0; i < barnPositions.length; i++) {
     const p = barnPositions[i];
     dummy.position.set(p.x, p.h + 3, p.z);
-    dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+    dummy.rotation.set(0, p.heading, 0);
     dummy.scale.setScalar(1);
     dummy.updateMatrix();
     barnInstanced.setMatrixAt(i, dummy.matrix);
-    // Slight color variation for barns
-    const variation = 0.9 + Math.random() * 0.2;
-    barnInstanced.setColorAt(i, barnColor.clone().multiplyScalar(variation));
+    barnTint.copy(barnColor).multiplyScalar(0.9 + Math.random() * 0.2);
+    barnInstanced.setColorAt(i, barnTint);
   }
   if (barnPositions.length > 0) barnInstanced.instanceColor.needsUpdate = true;
   scene.add(barnInstanced);
+
+  // Barn roofs
+  const barnRoofGeo = new THREE.ConeGeometry(9.4, 3.0, 4);
+  barnRoofGeo.rotateY(Math.PI * 0.25);
+  const barnRoofMat = new THREE.MeshLambertMaterial({ color: 0x5f3020 });
+  const barnRoofMesh = new THREE.InstancedMesh(barnRoofGeo, barnRoofMat, barnPositions.length);
+  const barnRoofBase = new THREE.Color(0x5f3020);
+  barnRoofMesh.castShadow = true;
+  barnRoofMesh.receiveShadow = true;
+  for (let i = 0; i < barnPositions.length; i++) {
+    const p = barnPositions[i];
+    dummy.position.set(p.x, p.h + 7.2, p.z);
+    dummy.rotation.set(0, p.heading, 0);
+    dummy.scale.set(1.1, 0.85 + Math.random() * 0.25, 1.25);
+    dummy.updateMatrix();
+    barnRoofMesh.setMatrixAt(i, dummy.matrix);
+    roofColor.copy(barnRoofBase).multiplyScalar(0.88 + Math.random() * 0.24);
+    barnRoofMesh.setColorAt(i, roofColor);
+  }
+  if (barnPositions.length > 0) barnRoofMesh.instanceColor.needsUpdate = true;
+  scene.add(barnRoofMesh);
+
+  // Grain silos near a subset of farmhouses
+  const siloPositions = [];
+  for (let i = 0; i < farmPositions.length; i++) {
+    if (Math.random() > 0.45) continue;
+    const base = farmPositions[i];
+    const dist = 10 + Math.random() * 8;
+    const a = base.heading + (Math.random() > 0.5 ? Math.PI * 0.5 : -Math.PI * 0.5);
+    siloPositions.push({
+      x: base.x + Math.cos(a) * dist,
+      z: base.z + Math.sin(a) * dist,
+      h: getTerrainHeight(base.x + Math.cos(a) * dist, base.z + Math.sin(a) * dist),
+      scale: 0.9 + Math.random() * 0.35,
+    });
+  }
+
+  if (siloPositions.length > 0) {
+    const siloBodyGeo = new THREE.CylinderGeometry(1.4, 1.6, 9, 10);
+    const siloBodyMat = new THREE.MeshLambertMaterial({ color: 0xb5b8bd });
+    const siloBodyMesh = new THREE.InstancedMesh(siloBodyGeo, siloBodyMat, siloPositions.length);
+    siloBodyMesh.castShadow = true;
+    siloBodyMesh.receiveShadow = true;
+
+    const siloCapGeo = new THREE.SphereGeometry(1.55, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5);
+    const siloCapMat = new THREE.MeshLambertMaterial({ color: 0x8f949a });
+    const siloCapMesh = new THREE.InstancedMesh(siloCapGeo, siloCapMat, siloPositions.length);
+    siloCapMesh.castShadow = true;
+    const siloBaseColor = new THREE.Color(0xb5b8bd);
+    const siloCapBaseColor = new THREE.Color(0x8f949a);
+
+    for (let i = 0; i < siloPositions.length; i++) {
+      const s = siloPositions[i];
+      dummy.position.set(s.x, s.h + 4.5 * s.scale, s.z);
+      dummy.rotation.set(0, Math.random() * Math.PI * 2, 0);
+      dummy.scale.setScalar(s.scale);
+      dummy.updateMatrix();
+      siloBodyMesh.setMatrixAt(i, dummy.matrix);
+      barnTint.copy(siloBaseColor).multiplyScalar(0.88 + Math.random() * 0.24);
+      siloBodyMesh.setColorAt(i, barnTint);
+
+      dummy.position.set(s.x, s.h + 9.0 * s.scale, s.z);
+      dummy.scale.setScalar(s.scale);
+      dummy.updateMatrix();
+      siloCapMesh.setMatrixAt(i, dummy.matrix);
+      roofColor.copy(siloCapBaseColor).multiplyScalar(0.9 + Math.random() * 0.2);
+      siloCapMesh.setColorAt(i, roofColor);
+    }
+
+    siloBodyMesh.instanceColor.needsUpdate = true;
+    siloCapMesh.instanceColor.needsUpdate = true;
+    scene.add(siloBodyMesh);
+    scene.add(siloCapMesh);
+  }
 }
 
 // Highway connecting Airport 1 → City → Airport 2
 export function createHighway(scene) {
-  // Define control points for a natural winding road
-  const controlPoints = [
-    new THREE.Vector3(0, 0, -200),           // Near Airport 1 (south end)
-    new THREE.Vector3(400, 0, -800),
-    new THREE.Vector3(1200, 0, -1600),
-    new THREE.Vector3(2000, 0, -2400),
-    new THREE.Vector3(2800, 0, -3000),
-    new THREE.Vector3(3600, 0, -3600),
-    new THREE.Vector3(CITY_CENTER_X, 0, CITY_CENTER_Z), // City center
-    new THREE.Vector3(4800, 0, -4800),
-    new THREE.Vector3(5600, 0, -5600),
-    new THREE.Vector3(6400, 0, -6400),
-    new THREE.Vector3(7200, 0, -7200),
-    new THREE.Vector3(AIRPORT2_X, 0, AIRPORT2_Z + 200), // Near Airport 2
-  ];
+  // Build winding control points from module-level centerline
+  const controlPoints = HIGHWAY_CENTERLINE.map(([x, z]) => new THREE.Vector3(x, 0, z));
 
   // Sample terrain height for each control point
   for (const pt of controlPoints) {
     pt.y = getTerrainHeight(pt.x, pt.z) + 0.2;
   }
 
-  const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.5);
+  const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.3);
 
   // Store the highway curve and sample points for external access
   highwayCurve = curve;
-  const segments = 200;
+  const segments = 300;
   highwaySamplePoints = curve.getPoints(segments);
 
   // Wider road: 18m
@@ -760,6 +1211,8 @@ export function createRockFormations(scene) {
 
 // Wildflower patches across low terrain meadows
 export function createWildflowers(scene) {
+  const densitySetting = isSettingExplicit('vegetationDensity') ? getSetting('vegetationDensity') : getSetting('graphicsQuality');
+  const flowerTarget = densitySetting === 'low' ? 1200 : (densitySetting === 'medium' ? 2100 : 3000);
   const dummy = new THREE.Object3D();
   const flowerColors = [
     new THREE.Color(0xffe033), // vivid golden yellow
@@ -777,7 +1230,7 @@ export function createWildflowers(scene) {
   ];
 
   const flowerPositions = [];
-  for (let i = 0; i < 18000 && flowerPositions.length < 3000; i++) {
+  for (let i = 0; i < 18000 && flowerPositions.length < flowerTarget; i++) {
     const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     if (isNearAirport(x, z)) continue;
@@ -812,12 +1265,52 @@ export function createWildflowers(scene) {
 }
 
 // ═══════════════════════════════════════════════════════════
-// Volumetric Cloud System
+// Volumetric Cluster Cloud System
 // ═══════════════════════════════════════════════════════════
 let cloudGroup;
 let cloudClusters = [];
 let cloudDensity = 'normal';
-let cloudMaterials = []; // for time-of-day color updates
+let cloudMaterials = [];
+let cloudSceneRef = null;
+let cloudQuality = 'high';
+let weatherCloudProfile = { cloudCount: 180, cloudOpacity: 0.28 };
+let cloudPuffTexture = null;
+let cloudWispTexture = null;
+let cloudCumulusMats = [];
+let cloudCirrusMats = [];
+let cloudShadowMats = [];
+
+const CLOUD_QUALITY_CONFIG = {
+  low: {
+    cumulusCount: 380,
+    cirrusCount: 90,
+    cumulusPuffMin: 10,
+    cumulusPuffMax: 15,
+    cirrusWispMin: 3,
+    cirrusWispMax: 5,
+    area: 50000,
+  },
+  medium: {
+    cumulusCount: 560,
+    cirrusCount: 140,
+    cumulusPuffMin: 12,
+    cumulusPuffMax: 18,
+    cirrusWispMin: 4,
+    cirrusWispMax: 6,
+    area: 52000,
+  },
+  high: {
+    cumulusCount: 760,
+    cirrusCount: 200,
+    cumulusPuffMin: 14,
+    cumulusPuffMax: 22,
+    cirrusWispMin: 5,
+    cirrusWispMax: 8,
+    area: 56000,
+  },
+};
+const CLOUD_DENSITY_ORDER = ['none', 'few', 'normal', 'many'];
+const CLOUD_DENSITY_MULTIPLIER = { none: 0, few: 0.5, normal: 0.9, many: 1.18 };
 
 // Create soft, organic cloud puff texture with multiple overlapping gradients
 function createCloudTexture() {
@@ -882,95 +1375,121 @@ function createWispTexture() {
 }
 
 export function createClouds(scene) {
+  cloudSceneRef = scene;
+
+  if (cloudGroup) {
+    scene.remove(cloudGroup);
+  }
+  for (const mat of cloudMaterials) {
+    mat.dispose();
+  }
+
   cloudGroup = new THREE.Group();
   cloudClusters = [];
   cloudMaterials = [];
+  cloudCumulusMats = [];
+  cloudCirrusMats = [];
+  cloudShadowMats = [];
 
-  const puffTex = createCloudTexture();
-  const wispTex = createWispTexture();
+  if (!cloudPuffTexture) cloudPuffTexture = createCloudTexture();
+  if (!cloudWispTexture) cloudWispTexture = createWispTexture();
+  const quality = CLOUD_QUALITY_CONFIG[cloudQuality] || CLOUD_QUALITY_CONFIG.high;
+  const opacityBase = Math.max(0.16, Math.min(0.96, weatherCloudProfile.cloudOpacity || 0.28));
 
-  // ── Cumulus clouds (main fluffy clouds) ──
-  // High opacity for strong visibility from any angle
-  const cumulusMats = [0.55, 0.65, 0.75, 0.85, 0.95].map(op => {
-    const m = new THREE.SpriteMaterial({
-      map: puffTex, transparent: true, opacity: op,
-      depthWrite: false, fog: false, color: 0xffffff,
+  const cumulusOpacities = [0.45, 0.55, 0.65, 0.75, 0.85];
+  const cirrusOpacities = [0.24, 0.32, 0.42];
+  const shadowOpacities = [0.12, 0.18, 0.24];
+
+  for (let i = 0; i < cumulusOpacities.length; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: cloudPuffTexture,
+      transparent: true,
+      opacity: Math.min(0.98, cumulusOpacities[i] * (0.7 + opacityBase * 0.95)),
+      depthWrite: false,
+      fog: false,
+      color: 0xf0f3fa,
     });
-    cloudMaterials.push(m);
-    return m;
-  });
+    mat.userData.role = 'cumulus';
+    cloudCumulusMats.push(mat);
+    cloudMaterials.push(mat);
+  }
 
-  // Cirrus materials (high wispy)
-  const cirrusMats = [0.3, 0.45, 0.55].map(op => {
-    const m = new THREE.SpriteMaterial({
-      map: wispTex, transparent: true, opacity: op,
-      depthWrite: false, fog: false, color: 0xf0f0ff,
+  for (let i = 0; i < cirrusOpacities.length; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: cloudWispTexture,
+      transparent: true,
+      opacity: Math.min(0.92, cirrusOpacities[i] * (0.72 + opacityBase * 0.92)),
+      depthWrite: false,
+      fog: false,
+      color: 0xdce4f2,
     });
-    cloudMaterials.push(m);
-    return m;
-  });
+    mat.userData.role = 'cirrus';
+    cloudCirrusMats.push(mat);
+    cloudMaterials.push(mat);
+  }
 
-  // ── Generate cumulus clouds ──
-  const cumulusCount = 500;
-  for (let c = 0; c < cumulusCount; c++) {
-    const cx = (Math.random() - 0.5) * 26000;
-    const cz = (Math.random() - 0.5) * 26000;
-    const cy = 550 + Math.random() * 350; // 550-900m altitude
+  for (let i = 0; i < shadowOpacities.length; i++) {
+    const mat = new THREE.SpriteMaterial({
+      map: cloudPuffTexture,
+      transparent: true,
+      opacity: Math.min(0.4, shadowOpacities[i] * (0.65 + opacityBase * 0.8)),
+      depthWrite: false,
+      fog: false,
+      color: 0x7f8594,
+    });
+    mat.userData.role = 'shadow';
+    cloudShadowMats.push(mat);
+    cloudMaterials.push(mat);
+  }
 
-    // Cloud dimensions — wide and relatively flat
-    const cloudW = 300 + Math.random() * 500;
-    const cloudD = 200 + Math.random() * 350;
-    const cloudH = 30 + Math.random() * 60;
+  const area = quality.area;
 
-    // More puffs = more volume: 10-18 sprites per cloud
-    const puffCount = 10 + Math.floor(Math.random() * 9);
+  // Cumulus clusters
+  for (let c = 0; c < quality.cumulusCount; c++) {
     const cluster = new THREE.Group();
-    cluster.position.set(cx, cy, cz);
+    cluster.position.set(
+      (Math.random() - 0.5) * area,
+      520 + Math.random() * 520,
+      (Math.random() - 0.5) * area
+    );
     cluster.userData.type = 'cumulus';
-    cluster.userData.baseY = cy;
+    cluster.userData.drift = 0.8 + Math.random() * 0.5;
+
+    const cloudW = 340 + Math.random() * 680;
+    const cloudD = 240 + Math.random() * 460;
+    const cloudH = 46 + Math.random() * 110;
+    const puffCount = quality.cumulusPuffMin + Math.floor(Math.random() * (quality.cumulusPuffMax - quality.cumulusPuffMin + 1));
 
     for (let p = 0; p < puffCount; p++) {
-      // Core puffs are denser, edge puffs are lighter
-      const isCore = p < puffCount * 0.4;
+      const isCore = p < puffCount * 0.42;
       const mat = isCore
-        ? cumulusMats[3 + Math.floor(Math.random() * 2)] // higher opacity
-        : cumulusMats[Math.floor(Math.random() * 3)];     // lower opacity
-
+        ? cloudCumulusMats[2 + Math.floor(Math.random() * 3)]
+        : cloudCumulusMats[Math.floor(Math.random() * 3)];
       const sprite = new THREE.Sprite(mat);
-
-      // Core puffs are bigger, edge puffs smaller
       const s = isCore
-        ? (200 + Math.random() * 250)
-        : (100 + Math.random() * 200);
-
-      sprite.scale.set(s, s * (0.45 + Math.random() * 0.25), 1);
-
-      // Core puffs cluster near center, edge puffs spread out
-      const spread = isCore ? 0.3 : 1.0;
+        ? (240 + Math.random() * 320)
+        : (150 + Math.random() * 230);
+      sprite.scale.set(s, s * (0.42 + Math.random() * 0.26), 1);
+      const spread = isCore ? 0.38 : 1.0;
       sprite.position.set(
         (Math.random() - 0.5) * cloudW * spread,
-        (Math.random() - 0.5) * cloudH + (isCore ? cloudH * 0.1 : 0),
+        (Math.random() - 0.5) * cloudH + (isCore ? cloudH * 0.12 : 0),
         (Math.random() - 0.5) * cloudD * spread
       );
-
       cluster.add(sprite);
     }
 
-    // Bottom shading sprites — darker puffs underneath for depth
-    const shadowCount = 3 + Math.floor(Math.random() * 3);
-    for (let s = 0; s < shadowCount; s++) {
-      const shadowMat = new THREE.SpriteMaterial({
-        map: puffTex, transparent: true, opacity: 0.25,
-        depthWrite: false, fog: false, color: 0x888899,
-      });
-      cloudMaterials.push(shadowMat);
-      const sprite = new THREE.Sprite(shadowMat);
-      const sz = 150 + Math.random() * 200;
-      sprite.scale.set(sz, sz * 0.3, 1);
+    // Underside shading puffs
+    const shadeCount = 4 + Math.floor(Math.random() * 4);
+    for (let s = 0; s < shadeCount; s++) {
+      const mat = cloudShadowMats[Math.floor(Math.random() * cloudShadowMats.length)];
+      const sprite = new THREE.Sprite(mat);
+      const sz = 170 + Math.random() * 230;
+      sprite.scale.set(sz, sz * 0.28, 1);
       sprite.position.set(
-        (Math.random() - 0.5) * cloudW * 0.6,
-        -cloudH * 0.5 - Math.random() * 15,
-        (Math.random() - 0.5) * cloudD * 0.6
+        (Math.random() - 0.5) * cloudW * 0.65,
+        -cloudH * 0.55 - Math.random() * 18,
+        (Math.random() - 0.5) * cloudD * 0.65
       );
       cluster.add(sprite);
     }
@@ -979,29 +1498,27 @@ export function createClouds(scene) {
     cloudClusters.push(cluster);
   }
 
-  // ── Generate cirrus clouds (high altitude wisps) ──
-  const cirrusCount = 125;
-  for (let c = 0; c < cirrusCount; c++) {
-    const cx = (Math.random() - 0.5) * 28000;
-    const cz = (Math.random() - 0.5) * 28000;
-    const cy = 1800 + Math.random() * 1200; // 1800-3000m
-
+  // Cirrus clusters
+  for (let c = 0; c < quality.cirrusCount; c++) {
     const cluster = new THREE.Group();
-    cluster.position.set(cx, cy, cz);
+    cluster.position.set(
+      (Math.random() - 0.5) * (area * 1.08),
+      1700 + Math.random() * 1500,
+      (Math.random() - 0.5) * (area * 1.08)
+    );
     cluster.userData.type = 'cirrus';
-    cluster.userData.baseY = cy;
+    cluster.userData.drift = 1.35 + Math.random() * 0.85;
 
-    const wispCount = 3 + Math.floor(Math.random() * 4);
+    const wispCount = quality.cirrusWispMin + Math.floor(Math.random() * (quality.cirrusWispMax - quality.cirrusWispMin + 1));
     for (let w = 0; w < wispCount; w++) {
-      const mat = cirrusMats[Math.floor(Math.random() * cirrusMats.length)];
+      const mat = cloudCirrusMats[Math.floor(Math.random() * cloudCirrusMats.length)];
       const sprite = new THREE.Sprite(mat);
-      // Cirrus are wide and thin
-      const sw = 400 + Math.random() * 600;
-      sprite.scale.set(sw, sw * 0.08, 1);
+      const sw = 520 + Math.random() * 760;
+      sprite.scale.set(sw, sw * (0.07 + Math.random() * 0.04), 1);
       sprite.position.set(
-        (Math.random() - 0.5) * 500,
-        (Math.random() - 0.5) * 20,
-        (Math.random() - 0.5) * 300
+        (Math.random() - 0.5) * 700,
+        (Math.random() - 0.5) * 26,
+        (Math.random() - 0.5) * 420
       );
       cluster.add(sprite);
     }
@@ -1015,74 +1532,85 @@ export function createClouds(scene) {
   return cloudGroup;
 }
 
-export function updateClouds(dt, windVector, cameraY) {
+export function updateClouds(dt, windVector, cameraY, focusX = 0, focusZ = 0) {
   if (!cloudGroup || !windVector) return;
 
-  const driftX = windVector.x * dt * 0.3;
-  const driftZ = windVector.z * dt * 0.3;
-  const limit = CLOUD_DENSITY_LIMITS[cloudDensity];
+  const driftX = windVector.x * dt * 0.32;
+  const driftZ = windVector.z * dt * 0.32;
+  const limit = getCloudActiveLimit();
+  const wrapHalfSpan = (CLOUD_QUALITY_CONFIG[cloudQuality] || CLOUD_QUALITY_CONFIG.high).area * 0.52;
+  const wrapSpan = wrapHalfSpan * 2;
 
   for (let i = 0; i < cloudClusters.length; i++) {
     const cluster = cloudClusters[i];
+    const isActive = i < limit;
 
-    // Density limit check
-    if (i >= limit) { cluster.visible = false; continue; }
-
-    // Wind drift (always update position even if hidden)
-    cluster.position.x += driftX;
-    cluster.position.z += driftZ;
-
-    // Cirrus drifts faster (jetstream)
-    if (cluster.userData.type === 'cirrus') {
-      cluster.position.x += driftX * 2;
+    if (!isActive) {
+      cluster.visible = false;
+      continue;
     }
+    cluster.visible = true;
 
-    // Wrap at world boundaries
-    if (cluster.position.x > 15000) cluster.position.x -= 30000;
-    if (cluster.position.x < -15000) cluster.position.x += 30000;
-    if (cluster.position.z > 15000) cluster.position.z -= 30000;
-    if (cluster.position.z < -15000) cluster.position.z += 30000;
+    const driftMul = cluster.userData.drift || 1.0;
+    cluster.position.x += driftX * driftMul;
+    cluster.position.z += driftZ * driftMul;
 
-    // Hide cumulus when camera is well above them
-    if (cameraY !== undefined && cluster.userData.type === 'cumulus') {
-      cluster.visible = cameraY <= cluster.userData.baseY + 500;
-    } else {
-      cluster.visible = true;
-    }
+    if (cluster.position.x - focusX > wrapHalfSpan) cluster.position.x -= wrapSpan;
+    if (cluster.position.x - focusX < -wrapHalfSpan) cluster.position.x += wrapSpan;
+    if (cluster.position.z - focusZ > wrapHalfSpan) cluster.position.z -= wrapSpan;
+    if (cluster.position.z - focusZ < -wrapHalfSpan) cluster.position.z += wrapSpan;
   }
 }
 
 // Update cloud colors based on time of day
 export function updateCloudColors(sunElevation) {
-  if (!cloudMaterials.length) return;
-  const color = new THREE.Color();
+  const cumulusColor = new THREE.Color();
+  const cirrusColor = new THREE.Color();
+  const shadowColor = new THREE.Color();
 
   if (sunElevation > 15) {
-    // Daytime — bright white
-    color.setHex(0xffffff);
+    // Daytime
+    cumulusColor.setHex(0xf0f3fa);
+    cirrusColor.setHex(0xdde4f2);
+    shadowColor.setHex(0x7f8593);
   } else if (sunElevation > 0) {
-    // Sunset/sunrise — warm golden to pink
+    // Sunset/sunrise
     const t = sunElevation / 15;
-    color.setRGB(1.0, 0.75 + t * 0.25, 0.5 + t * 0.5);
+    cumulusColor.setRGB(1.0, 0.78 + t * 0.18, 0.62 + t * 0.3);
+    cirrusColor.setRGB(0.92, 0.72 + t * 0.2, 0.68 + t * 0.2);
+    shadowColor.setRGB(0.56, 0.47 + t * 0.16, 0.44 + t * 0.2);
   } else if (sunElevation > -5) {
-    // Twilight — purple/pink
+    // Twilight
     const t = (sunElevation + 5) / 5;
-    color.setRGB(0.5 + t * 0.5, 0.3 + t * 0.45, 0.5);
+    cumulusColor.setRGB(0.55 + t * 0.34, 0.43 + t * 0.28, 0.66 + t * 0.16);
+    cirrusColor.setRGB(0.44 + t * 0.3, 0.4 + t * 0.24, 0.66 + t * 0.12);
+    shadowColor.setRGB(0.32 + t * 0.2, 0.3 + t * 0.2, 0.42 + t * 0.14);
   } else {
-    // Night — dark blue-gray
-    color.setRGB(0.15, 0.15, 0.2);
+    // Night
+    cumulusColor.setRGB(0.2, 0.21, 0.28);
+    cirrusColor.setRGB(0.17, 0.19, 0.26);
+    shadowColor.setRGB(0.13, 0.14, 0.18);
   }
 
-  for (const mat of cloudMaterials) {
-    mat.color.copy(color);
+  for (let i = 0; i < cloudMaterials.length; i++) {
+    const mat = cloudMaterials[i];
+    const role = mat.userData.role;
+    if (role === 'cumulus') mat.color.copy(cumulusColor);
+    else if (role === 'cirrus') mat.color.copy(cirrusColor);
+    else mat.color.copy(shadowColor);
   }
 }
 
-const CLOUD_DENSITY_ORDER = ['none', 'few', 'normal', 'many'];
-const CLOUD_DENSITY_LIMITS = { none: 0, few: 150, normal: 400, many: 625 };
+function getCloudActiveLimit() {
+  const quality = CLOUD_QUALITY_CONFIG[cloudQuality] || CLOUD_QUALITY_CONFIG.high;
+  const baseCount = quality.cumulusCount + quality.cirrusCount;
+  const weatherFactor = Math.max(0.45, Math.min(2.0, (weatherCloudProfile.cloudCount || 180) / 180));
+  const densityFactor = CLOUD_DENSITY_MULTIPLIER[cloudDensity] ?? 1.0;
+  return Math.floor(baseCount * weatherFactor * densityFactor);
+}
 
 function applyCloudDensity() {
-  const limit = CLOUD_DENSITY_LIMITS[cloudDensity];
+  const limit = getCloudActiveLimit();
   for (let i = 0; i < cloudClusters.length; i++) {
     cloudClusters[i].visible = i < limit;
   }
@@ -1099,6 +1627,40 @@ export function getCloudDensity() {
   return cloudDensity;
 }
 
+export function setCloudQuality(level) {
+  if (!CLOUD_QUALITY_CONFIG[level]) return cloudQuality;
+  if (cloudQuality === level) return cloudQuality;
+  cloudQuality = level;
+  if (cloudSceneRef) createClouds(cloudSceneRef);
+  return cloudQuality;
+}
+
+export function applyWeatherCloudProfile(profile) {
+  if (profile && typeof profile === 'object') {
+    if (typeof profile.cloudCount === 'number') weatherCloudProfile.cloudCount = profile.cloudCount;
+    if (typeof profile.cloudOpacity === 'number') weatherCloudProfile.cloudOpacity = profile.cloudOpacity;
+  }
+
+  const opacityBase = Math.max(0.16, Math.min(0.96, weatherCloudProfile.cloudOpacity || 0.28));
+  for (let i = 0; i < cloudCumulusMats.length; i++) {
+    const mat = cloudCumulusMats[i];
+    const base = [0.45, 0.55, 0.65, 0.75, 0.85][i] || 0.65;
+    mat.opacity = Math.min(0.98, base * (0.7 + opacityBase * 0.95));
+  }
+  for (let i = 0; i < cloudCirrusMats.length; i++) {
+    const mat = cloudCirrusMats[i];
+    const base = [0.24, 0.32, 0.42][i] || 0.3;
+    mat.opacity = Math.min(0.92, base * (0.72 + opacityBase * 0.92));
+  }
+  for (let i = 0; i < cloudShadowMats.length; i++) {
+    const mat = cloudShadowMats[i];
+    const base = [0.12, 0.18, 0.24][i] || 0.18;
+    mat.opacity = Math.min(0.4, base * (0.65 + opacityBase * 0.8));
+  }
+
+  applyCloudDensity();
+}
+
 // Water using Three.js Water addon
 let water;
 
@@ -1111,16 +1673,40 @@ function createWaterNormalMap() {
   const imageData = ctx.createImageData(size, size);
   const data = imageData.data;
 
+  // Generate a proper tangent-space normal map with multi-octave waves
+  const step = 1.0 / size;
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
-      const u = x / size * Math.PI * 8;
-      const v = y / size * Math.PI * 8;
-      const wave = Math.sin(u + v * 0.5) * 0.5 + Math.sin(u * 2.3 - v * 1.7) * 0.3 + Math.sin(u * 0.7 + v * 3.1) * 0.2;
+      const u = x * step;
+      const v = y * step;
+
+      // Height function at (u,v) — 5 octaves of sine waves
+      const h = (ux, uy) => {
+        const a = ux * Math.PI * 8;
+        const b = uy * Math.PI * 8;
+        return Math.sin(a + b * 0.5) * 0.5
+             + Math.sin(a * 2.3 - b * 1.7) * 0.3
+             + Math.sin(a * 0.7 + b * 3.1) * 0.2
+             + Math.sin(a * 3.7 + b * 0.9) * 0.15
+             + Math.sin(a * 1.5 - b * 4.3) * 0.1;
+      };
+
+      // Finite difference normals
+      const eps = step * 0.5;
+      const dhdx = (h(u + eps, v) - h(u - eps, v)) / (2 * eps);
+      const dhdy = (h(u, v + eps) - h(u, v - eps)) / (2 * eps);
+
+      // Tangent-space normal: (-dhdx, -dhdy, 1) normalized, then mapped to [0,255]
+      const scale = 0.08; // controls normal map strength
+      const nx = -dhdx * scale;
+      const ny = -dhdy * scale;
+      const nz = 1.0;
+      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
 
       const idx = (y * size + x) * 4;
-      data[idx] = (wave * 0.5 + 0.5) * 255;
-      data[idx + 1] = 128;
-      data[idx + 2] = (wave * 0.5 + 0.5) * 255;
+      data[idx]     = Math.floor(((nx / len) * 0.5 + 0.5) * 255); // R
+      data[idx + 1] = Math.floor(((ny / len) * 0.5 + 0.5) * 255); // G
+      data[idx + 2] = Math.floor(((nz / len) * 0.5 + 0.5) * 255); // B
       data[idx + 3] = 255;
     }
   }
@@ -1154,7 +1740,11 @@ export function createWater(scene) {
   return water;
 }
 
-export function updateWater(dt) {
+export function updateWater(dt, windVector) {
   if (!water) return;
-  water.material.uniforms['time'].value += dt;
+  const windSpeed = windVector ? Math.hypot(windVector.x, windVector.z) : 0;
+  const timeScale = 1.0 + Math.min(1.2, windSpeed * 0.04);
+  water.material.uniforms['time'].value += dt * timeScale;
+  water.material.uniforms['sunDirection'].value.copy(getSunDirection());
+  water.material.uniforms['distortionScale'].value = 3.2 + Math.min(3.8, windSpeed * 0.24);
 }

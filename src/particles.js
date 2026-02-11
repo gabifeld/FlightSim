@@ -1,6 +1,6 @@
 // GPU particle effects: tire smoke, dust, engine exhaust
 import * as THREE from 'three';
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { getAircraftType } from './aircraftTypes.js';
 
 // Particle system pools
@@ -170,14 +170,14 @@ export function initParticles(scene) {
 
 export function triggerTireSmoke(intensity) {
   if (!tireSmoke) return;
-  const pos = aircraftState.position;
+  const pos = getActiveVehicle().position;
   const count = Math.min(Math.floor(intensity * 30), 50);
   emitParticles(tireSmoke, count, pos.x, pos.y - 1, pos.z, 3 + intensity * 2, 2.0, [1, 4]);
 }
 
 export function triggerDustCloud(intensity) {
   if (!dustCloud) return;
-  const pos = aircraftState.position;
+  const pos = getActiveVehicle().position;
   const count = Math.min(Math.floor(intensity * 20), 30);
   emitParticles(dustCloud, count, pos.x, pos.y - 1, pos.z, 2 + intensity, 2.5, [2, 5]);
 }
@@ -189,11 +189,11 @@ export function updateParticles(dt) {
   if (exhaustRight) updateParticleSystem(exhaustRight, dt);
 
   // Engine exhaust - continuous when throttle > 70%
-  if (aircraftState.throttle > 0.7 && !aircraftState.onGround) {
-    const type = getAircraftType(aircraftState.currentType);
-    const pos = aircraftState.position;
-    _fwd.set(0, 0, 1).applyQuaternion(aircraftState.quaternion);
-    _right.set(1, 0, 0).applyQuaternion(aircraftState.quaternion);
+  if (getActiveVehicle().throttle > 0.7 && !getActiveVehicle().onGround) {
+    const type = getAircraftType(getActiveVehicle().currentType);
+    const pos = getActiveVehicle().position;
+    _fwd.set(0, 0, 1).applyQuaternion(getActiveVehicle().quaternion);
+    _right.set(1, 0, 0).applyQuaternion(getActiveVehicle().quaternion);
 
     const exhaustOffset = type.fuselageLength * 0.5;
     _basePos.copy(pos).addScaledVector(_fwd, exhaustOffset);
@@ -202,7 +202,7 @@ export function updateParticles(dt) {
       // Single engine exhaust
       if (exhaustLeft) {
         emitParticles(exhaustLeft, 2, _basePos.x, _basePos.y, _basePos.z,
-          2 + aircraftState.throttle * 3, 0.5, [0.5, 2]);
+          2 + getActiveVehicle().throttle * 3, 0.5, [0.5, 2]);
       }
     } else if (type.engineCount >= 2) {
       const nacSpacing = type.wingSpan * 0.28;
@@ -211,11 +211,11 @@ export function updateParticles(dt) {
 
       if (exhaustLeft) {
         emitParticles(exhaustLeft, 1, _leftPos.x, _leftPos.y, _leftPos.z,
-          1 + aircraftState.throttle * 2, 0.4, [0.3, 1.5]);
+          1 + getActiveVehicle().throttle * 2, 0.4, [0.3, 1.5]);
       }
       if (exhaustRight) {
         emitParticles(exhaustRight, 1, _rightPos.x, _rightPos.y, _rightPos.z,
-          1 + aircraftState.throttle * 2, 0.4, [0.3, 1.5]);
+          1 + getActiveVehicle().throttle * 2, 0.4, [0.3, 1.5]);
       }
     }
   }

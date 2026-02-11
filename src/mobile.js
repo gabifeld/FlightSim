@@ -1,6 +1,6 @@
 // Mobile touch controls — virtual joystick + buttons (no tilt)
 
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { playGearSound, playFlapSound } from './audio.js';
 import { togglePause, isMenuOpen } from './menu.js';
 import { toggleCamera } from './camera.js';
@@ -242,8 +242,8 @@ function updateToggleVisuals() {
   const gearBtn = overlay.querySelector('.mob-btn-gear');
   const flapBtn = overlay.querySelector('.mob-btn-flaps');
   const assistBtn = overlay.querySelector('.mob-btn-assist');
-  if (gearBtn) gearBtn.classList.toggle('mob-btn-on', aircraftState.gear);
-  if (flapBtn) flapBtn.classList.toggle('mob-btn-on', aircraftState.flaps);
+  if (gearBtn) gearBtn.classList.toggle('mob-btn-on', getActiveVehicle().gear);
+  if (flapBtn) flapBtn.classList.toggle('mob-btn-on', getActiveVehicle().flaps);
   if (assistBtn) assistBtn.classList.toggle('mob-btn-on', isLandingAssistActive());
 }
 
@@ -272,8 +272,8 @@ export function updateMobile(dt) {
     const cur = !!buttonState[name];
     const prev = !!prevButtonState[name];
     if (cur && !prev) {
-      if (name === 'gear') { aircraftState.gear = !aircraftState.gear; playGearSound(); }
-      if (name === 'flaps') { aircraftState.flaps = !aircraftState.flaps; playFlapSound(); }
+      if (name === 'gear') { getActiveVehicle().gear = !getActiveVehicle().gear; playGearSound(); }
+      if (name === 'flaps') { getActiveVehicle().flaps = !getActiveVehicle().flaps; playFlapSound(); }
       if (name === 'camera') toggleCamera();
       if (name === 'ils') toggleILS();
       if (name === 'assist') toggleLandingAssist();

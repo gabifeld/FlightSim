@@ -5,11 +5,32 @@ import { CITY_CENTER_X, CITY_CENTER_Z, CITY_SIZE } from './constants.js';
 const roadSegments = [];
 const roadIntersections = [];
 const HALF = CITY_SIZE / 2;
+let roadNetworkCache = Object.freeze([]);
+let roadIntersectionsCache = Object.freeze([]);
 
 let streetBulbMesh = null;
 let streetGlowMesh = null;
 let buildingWindowMesh = null;
 let obstructionLightMesh = null;
+
+function rebuildRoadCaches() {
+  roadNetworkCache = Object.freeze(roadSegments.map(seg => Object.freeze({
+    start: Object.freeze({ x: seg.start.x, z: seg.start.z }),
+    end: Object.freeze({ x: seg.end.x, z: seg.end.z }),
+    width: seg.width,
+    type: seg.type,
+    direction: Math.atan2(seg.end.z - seg.start.z, seg.end.x - seg.start.x),
+    lanes: seg.type === 'major' ? 4 : 2,
+  })));
+
+  roadIntersectionsCache = Object.freeze(roadIntersections.map(i => Object.freeze({
+    x: i.x,
+    z: i.z,
+    type: i.type,
+    nsRoadWidth: i.nsRoadWidth,
+    ewRoadWidth: i.ewRoadWidth,
+  })));
+}
 
 // Seeded PRNG for deterministic layout
 let _seed = 12345;
@@ -1057,6 +1078,7 @@ export function createCity(scene) {
   buildRooftopDetails(scene, placements);
   buildParks(scene, placements);
   buildStreetLights(scene);
+  rebuildRoadCaches();
 
   const total = placements.buildings.length + placements.podiums.length;
   console.log(`[City] ${total} buildings, ${placements.podiums.length} podiums, ${roadSegments.length} roads, ${roadIntersections.length} intersections, ${placements.parkBlocks.length} parks`);
@@ -1082,14 +1104,7 @@ export function updateCityNight(isNight) {
  * Each segment includes start/end world coords, width, type, direction, and lane count.
  */
 export function getRoadNetwork() {
-  return roadSegments.map(seg => ({
-    start: { x: seg.start.x, z: seg.start.z },
-    end: { x: seg.end.x, z: seg.end.z },
-    width: seg.width,
-    type: seg.type,
-    direction: Math.atan2(seg.end.z - seg.start.z, seg.end.x - seg.start.x),
-    lanes: seg.type === 'major' ? 4 : 2,
-  }));
+  return roadNetworkCache;
 }
 
 /**
@@ -1097,11 +1112,5 @@ export function getRoadNetwork() {
  * Each intersection has position, type, and the widths of crossing roads.
  */
 export function getRoadIntersections() {
-  return roadIntersections.map(i => ({
-    x: i.x,
-    z: i.z,
-    type: i.type,
-    nsRoadWidth: i.nsRoadWidth,
-    ewRoadWidth: i.ewRoadWidth,
-  }));
+  return roadIntersectionsCache;
 }

@@ -1,4 +1,4 @@
-import { aircraftState } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { getKeys } from './controls.js';
 import { getWeatherState } from './weather.js';
 import { getAircraftType } from './aircraftTypes.js';
@@ -10,6 +10,7 @@ import { getTimeOfDay, isNight } from './scene.js';
 import { isReplayPlaying, getReplayState } from './replay.js';
 import { getCurrentPreset } from './weatherFx.js';
 import { isMenuOpen } from './menu.js';
+import { getActiveChallenge, getChallengeState, formatTime } from './challenges.js';
 import {
   MS_TO_KNOTS, M_TO_FEET, MS_TO_FPM, STALL_AOA,
   RUNWAY_WIDTH, RUNWAY_LENGTH, TAXI_SPEED_LIMIT,
@@ -25,6 +26,9 @@ let minimapCtx = null;
 let minimapZoom = 'local'; // 'local' | 'overview'
 let terrainImage = null; // cached terrain background
 let ilsDismissed = false;
+let lastMinimapUpdateMs = 0;
+let cachedRoadNetwork = null;
+let cachedTaxiNetwork = null;
 
 export function initHUD() {
   els = {
@@ -78,6 +82,16 @@ export function initHUD() {
     scoreTz: document.getElementById('score-tz'),
     scoreSpeed: document.getElementById('score-speed'),
     scoreBest: document.getElementById('score-best'),
+    // Challenge elements
+    dailyBriefing: document.getElementById('daily-briefing'),
+    dailySeed: document.getElementById('daily-seed'),
+    dailyAircraft: document.getElementById('daily-aircraft'),
+    dailyApproach: document.getElementById('daily-approach'),
+    dailyWind: document.getElementById('daily-wind'),
+    dailyEmergency: document.getElementById('daily-emergency'),
+    speedrunTimer: document.getElementById('speedrun-timer'),
+    speedrunTime: document.getElementById('speedrun-time'),
+    engineFailWarning: document.getElementById('engine-fail-warning'),
   };
 
   const minimapCanvas = document.getElementById('minimap-canvas');
@@ -90,6 +104,8 @@ export function initHUD() {
     });
     // Pre-render terrain (deferred slightly for terrain to be ready)
     setTimeout(() => renderTerrainImage(), 100);
+    cachedTaxiNetwork = getTaxiwayNetwork();
+    cachedRoadNetwork = getRoadNetwork();
   }
 }
 
@@ -106,15 +122,13 @@ export function updateHUD(flightState) {
     if (helpEl) helpEl.style.opacity = '1';
   }
 
-  const state = aircraftState;
+  const state = getActiveVehicle();
   const keys = getKeys();
+  const isAircraftVehicle = isAircraft(state);
 
   // Flight data
   if (els.speed) els.speed.textContent = Math.round(state.speed * MS_TO_KNOTS);
   if (els.altitude) els.altitude.textContent = Math.round(state.altitude * M_TO_FEET);
-
-  const vs = Math.round(state.verticalSpeed * MS_TO_FPM);
-  if (els.vspeed) els.vspeed.textContent = (vs > 0 ? '+' : '') + vs;
 
   if (els.heading) els.heading.textContent = String(Math.round(state.heading)).padStart(3, '0');
 
@@ -123,22 +137,50 @@ export function updateHUD(flightState) {
   if (els.throttle) els.throttle.textContent = thrPct + '%';
   if (els.throttleBar) els.throttleBar.style.width = thrPct + '%';
 
-  // Gear
-  if (els.gear) {
-    els.gear.textContent = state.gear ? 'DOWN' : 'UP';
-    els.gear.className = 'sys-status ' + (state.gear ? 'on' : 'warn');
-  }
+  // Flight-specific HUD (aircraft only)
+  if (isAircraftVehicle) {
+    const vs = Math.round(state.verticalSpeed * MS_TO_FPM);
+    if (els.vspeed) { els.vspeed.textContent = (vs > 0 ? '+' : '') + vs; els.vspeed.parentElement && (els.vspeed.style.display = ''); }
 
-  // Flaps
-  if (els.flaps) {
-    els.flaps.textContent = state.flaps ? 'DOWN' : 'UP';
-    els.flaps.className = 'sys-status ' + (state.flaps ? 'on' : 'off');
-  }
-
-  // Speedbrake
-  if (els.speedbrake) {
-    els.speedbrake.textContent = state.speedbrake ? 'ON' : 'OFF';
-    els.speedbrake.className = 'sys-status ' + (state.speedbrake ? 'active' : 'off');
+    if (els.gear) {
+      els.gear.textContent = state.gear ? 'DOWN' : 'UP';
+      els.gear.className = 'sys-status ' + (state.gear ? 'on' : 'warn');
+    }
+    if (els.flaps) {
+      els.flaps.textContent = state.flaps ? 'DOWN' : 'UP';
+      els.flaps.className = 'sys-status ' + (state.flaps ? 'on' : 'off');
+    }
+    if (els.speedbrake) {
+      els.speedbrake.textContent = state.speedbrake ? 'ON' : 'OFF';
+      els.speedbrake.className = 'sys-status ' + (state.speedbrake ? 'active' : 'off');
+    }
+    if (els.horizon) {
+      const pitch = radToDeg(state.euler.x);
+      const roll = radToDeg(state.euler.z);
+      els.horizon.style.transform = `translateY(${pitch * 1.5}px) rotate(${-roll}deg)`;
+    }
+    if (els.aoa) {
+      const aoaDeg = radToDeg(state.aoa);
+      els.aoa.textContent = aoaDeg.toFixed(1) + '\u00B0';
+    }
+    if (els.gforce) {
+      els.gforce.textContent = state.gForce.toFixed(1) + 'G';
+    }
+    const stallAoa = state.config ? state.config.stallAoa : STALL_AOA;
+    const isStalling = Math.abs(state.aoa) > stallAoa && state.speed > 5;
+    if (els.stallWarning) {
+      els.stallWarning.style.display = isStalling ? 'block' : 'none';
+    }
+  } else {
+    // Non-aircraft: hide flight instruments
+    if (els.vspeed) els.vspeed.textContent = '--';
+    if (els.gear) { els.gear.textContent = '--'; els.gear.className = 'sys-status off'; }
+    if (els.flaps) { els.flaps.textContent = '--'; els.flaps.className = 'sys-status off'; }
+    if (els.speedbrake) { els.speedbrake.textContent = '--'; els.speedbrake.className = 'sys-status off'; }
+    if (els.aoa) els.aoa.textContent = '--';
+    if (els.gforce) els.gforce.textContent = '--';
+    if (els.stallWarning) els.stallWarning.style.display = 'none';
+    if (els.horizon) els.horizon.style.transform = '';
   }
 
   // Brake
@@ -146,32 +188,6 @@ export function updateHUD(flightState) {
   if (els.brake) {
     els.brake.textContent = braking ? 'ON' : 'OFF';
     els.brake.className = 'sys-status ' + (braking ? 'active' : 'off');
-  }
-
-  // Attitude indicator
-  if (els.horizon) {
-    const pitch = radToDeg(state.euler.x);
-    const roll = radToDeg(state.euler.z);
-    els.horizon.style.transform =
-      `translateY(${pitch * 1.5}px) rotate(${-roll}deg)`;
-  }
-
-  // AoA display
-  if (els.aoa) {
-    const aoaDeg = radToDeg(state.aoa);
-    els.aoa.textContent = aoaDeg.toFixed(1) + '\u00B0';
-  }
-
-  // G-force display
-  if (els.gforce) {
-    els.gforce.textContent = state.gForce.toFixed(1) + 'G';
-  }
-
-  // Stall warning
-  const stallAoa = state.config ? state.config.stallAoa : STALL_AOA;
-  const isStalling = Math.abs(state.aoa) > stallAoa && state.speed > 5;
-  if (els.stallWarning) {
-    els.stallWarning.style.display = isStalling ? 'block' : 'none';
   }
 
   // Wind display
@@ -182,10 +198,14 @@ export function updateHUD(flightState) {
     els.wind.textContent = `${String(windDir).padStart(3, '0')}/${windSpd}KT`;
   }
 
-  // Aircraft name
+  // Vehicle name
   if (els.aircraftName) {
-    const type = getAircraftType(state.currentType);
-    els.aircraftName.textContent = type.name;
+    if (isAircraftVehicle) {
+      const type = getAircraftType(state.currentType);
+      els.aircraftName.textContent = type.name;
+    } else {
+      els.aircraftName.textContent = (state.config && state.config.name) || state.currentType || 'Vehicle';
+    }
   }
 
   // Taxi mode indicator
@@ -201,16 +221,18 @@ export function updateHUD(flightState) {
     }
   }
 
-  // Landing/taxi lights
+  // Lights indicator
   if (els.lightsIndicator) {
-    els.lightsIndicator.textContent = state.landingLight ? 'ON' : 'OFF';
-    els.lightsIndicator.className = 'sys-status ' + (state.landingLight ? 'on' : 'off');
+    const lightsOn = isAircraftVehicle ? state.landingLight : state.headlights;
+    els.lightsIndicator.textContent = lightsOn ? 'ON' : 'OFF';
+    els.lightsIndicator.className = 'sys-status ' + (lightsOn ? 'on' : 'off');
   }
 
-  // Autopilot panel
-  updateAPPanel();
+  // Autopilot panel (aircraft only)
+  if (isAircraftVehicle) updateAPPanel();
+  else if (els.apPanel) els.apPanel.style.display = 'none';
 
-  // Landing assist indicator
+  // Landing assist indicator (aircraft only)
   let assistEl = document.getElementById('hud-landing-assist');
   if (isLandingAssistActive()) {
     if (!assistEl) {
@@ -276,6 +298,9 @@ export function updateHUD(flightState) {
     els.weatherIndicator.textContent = getCurrentPreset().toUpperCase() + ' | CLD: ' + getCloudDensity().toUpperCase();
   }
 
+  // Challenge HUD
+  updateChallengeHUD();
+
   // ILS guidance
   updateILS(state);
 
@@ -284,6 +309,104 @@ export function updateHUD(flightState) {
 
   // Minimap
   updateMinimap();
+}
+
+let dailyBriefingDismissed = false;
+let dailyDismissHandler = null;
+let dailyDismissTouchHandler = null;
+let dailyAutoTimer = 0;
+let engineFailShown = false;
+let speedrunFinishedShown = false;
+
+function dismissDailyBriefing() {
+  dailyBriefingDismissed = true;
+  if (els.dailyBriefing) els.dailyBriefing.style.display = 'none';
+}
+
+function updateChallengeHUD() {
+  const challenge = getActiveChallenge();
+  const cs = getChallengeState();
+
+  // Engine failure warning — force animation restart on each new failure
+  if (els.engineFailWarning) {
+    if (cs.engineFailed) {
+      if (!engineFailShown) {
+        engineFailShown = true;
+        // Force animation restart by re-inserting element
+        const parent = els.engineFailWarning.parentNode;
+        const next = els.engineFailWarning.nextSibling;
+        parent.removeChild(els.engineFailWarning);
+        void els.engineFailWarning.offsetWidth; // trigger reflow
+        parent.insertBefore(els.engineFailWarning, next);
+      }
+      els.engineFailWarning.style.display = 'block';
+    } else {
+      els.engineFailWarning.style.display = 'none';
+      engineFailShown = false;
+    }
+  }
+
+  // Speedrun timer — force finished animation restart
+  if (els.speedrunTimer) {
+    if (challenge === 'speedrun') {
+      els.speedrunTimer.style.display = 'block';
+      if (els.speedrunTime) {
+        els.speedrunTime.textContent = formatTime(cs.speedrunTimer);
+        if (cs.speedrunFinished) {
+          if (!speedrunFinishedShown) {
+            speedrunFinishedShown = true;
+            // Force animation restart
+            els.speedrunTime.classList.remove('finished');
+            void els.speedrunTime.offsetWidth;
+            els.speedrunTime.classList.add('finished');
+          }
+        } else {
+          els.speedrunTime.classList.remove('finished');
+          speedrunFinishedShown = false;
+        }
+      }
+    } else {
+      els.speedrunTimer.style.display = 'none';
+      speedrunFinishedShown = false;
+    }
+  }
+
+  // Daily briefing panel — with auto-dismiss after 5s
+  if (els.dailyBriefing) {
+    if (challenge === 'daily' && cs.dailyParams && !dailyBriefingDismissed) {
+      const p = cs.dailyParams;
+      els.dailyBriefing.style.display = 'block';
+      if (els.dailySeed) els.dailySeed.textContent = `#${p.seed}`;
+      if (els.dailyAircraft) els.dailyAircraft.textContent = p.aircraft.replace(/_/g, ' ').toUpperCase();
+      if (els.dailyApproach) els.dailyApproach.textContent = p.approach === 'short_final' ? 'SHORT FINAL' : 'LONG FINAL';
+      if (els.dailyWind) els.dailyWind.textContent = `${String(p.windDir).padStart(3, '0')}/${p.windSpeed}KT`;
+      if (els.dailyEmergency) els.dailyEmergency.textContent = p.emergency ? `ENGINE OUT ~${p.failAlt}FT` : 'NONE';
+
+      // Bind dismiss handler once per daily session
+      if (!dailyDismissHandler) {
+        dailyDismissHandler = () => dismissDailyBriefing();
+        dailyDismissTouchHandler = (e) => { e.preventDefault(); dismissDailyBriefing(); };
+        els.dailyBriefing.addEventListener('click', dailyDismissHandler);
+        els.dailyBriefing.addEventListener('touchend', dailyDismissTouchHandler);
+        // Auto-dismiss after 5 seconds
+        dailyAutoTimer = setTimeout(dismissDailyBriefing, 5000);
+      }
+    } else if (challenge !== 'daily') {
+      els.dailyBriefing.style.display = 'none';
+      // Clean up listeners and timer
+      if (dailyDismissHandler) {
+        els.dailyBriefing.removeEventListener('click', dailyDismissHandler);
+        els.dailyBriefing.removeEventListener('touchend', dailyDismissTouchHandler);
+        dailyDismissHandler = null;
+        dailyDismissTouchHandler = null;
+      }
+      if (dailyAutoTimer) {
+        clearTimeout(dailyAutoTimer);
+        dailyAutoTimer = 0;
+      }
+      dailyBriefingDismissed = false;
+    }
+  }
 }
 
 function updateAPPanel() {
@@ -374,6 +497,16 @@ function updateILS(state) {
 export function showLandingScore(score) {
   if (!els.scorePanel) return;
   els.scorePanel.style.display = 'block';
+  els.scorePanel.style.cursor = 'pointer';
+
+  // Click/tap to dismiss
+  const dismiss = () => {
+    hideLandingScore();
+    els.scorePanel.removeEventListener('click', dismiss);
+    els.scorePanel.removeEventListener('touchend', dismiss);
+  };
+  els.scorePanel.addEventListener('click', dismiss);
+  els.scorePanel.addEventListener('touchend', dismiss);
 
   if (els.scoreGrade) {
     els.scoreGrade.textContent = score.overall.grade;
@@ -438,13 +571,17 @@ function renderTerrainImage() {
 
 function updateMinimap() {
   if (!minimapCtx) return;
+  const nowMs = performance.now();
+  const refreshInterval = minimapZoom === 'local' ? 100 : 250; // 10Hz local, 4Hz overview
+  if (nowMs - lastMinimapUpdateMs < refreshInterval) return;
+  lastMinimapUpdateMs = nowMs;
 
   const ctx = minimapCtx;
   const w = 180;
   const h = 180;
 
-  const px = aircraftState.position.x;
-  const pz = aircraftState.position.z;
+  const px = getActiveVehicle().position.x;
+  const pz = getActiveVehicle().position.z;
 
   // Zoom levels
   const viewRange = minimapZoom === 'local' ? 4000 : 20000;
@@ -498,7 +635,7 @@ function updateMinimap() {
   ctx.stroke();
 
   // Taxi network edges (Airport 1)
-  const network = getTaxiwayNetwork();
+  const network = cachedTaxiNetwork || getTaxiwayNetwork();
   ctx.strokeStyle = 'rgba(200, 200, 0, 0.2)';
   ctx.lineWidth = 1;
   for (const [a, b] of network.edges) {
@@ -525,17 +662,17 @@ function updateMinimap() {
   ctx.fillRect(cityX, cityY, cityW, cityH);
 
   // City roads
-  try {
-    const roads = getRoadNetwork();
-    ctx.strokeStyle = 'rgba(80, 80, 80, 0.6)';
-    for (const seg of roads) {
-      ctx.lineWidth = Math.max(0.5, seg.width * scale);
-      ctx.beginPath();
-      ctx.moveTo(toX(seg.start.x), toY(seg.start.z));
-      ctx.lineTo(toX(seg.end.x), toY(seg.end.z));
-      ctx.stroke();
-    }
-  } catch(e) { /* city not loaded yet */ }
+  if (!cachedRoadNetwork || cachedRoadNetwork.length === 0) {
+    cachedRoadNetwork = getRoadNetwork();
+  }
+  ctx.strokeStyle = 'rgba(80, 80, 80, 0.6)';
+  for (const seg of cachedRoadNetwork) {
+    ctx.lineWidth = Math.max(0.5, seg.width * scale);
+    ctx.beginPath();
+    ctx.moveTo(toX(seg.start.x), toY(seg.start.z));
+    ctx.lineTo(toX(seg.end.x), toY(seg.end.z));
+    ctx.stroke();
+  }
 
   // Glideslope line (when in landing mode)
   if (isLandingMode() && !hasTouchdown()) {
@@ -571,7 +708,7 @@ function updateMinimap() {
   ctx.fill();
 
   // Heading line
-  const hdgRad = (aircraftState.heading * Math.PI) / 180;
+  const hdgRad = (getActiveVehicle().heading * Math.PI) / 180;
   const lineLen = 15;
   ctx.strokeStyle = '#44ff66';
   ctx.lineWidth = 1.5;

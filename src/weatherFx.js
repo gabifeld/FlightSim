@@ -1,8 +1,9 @@
 // Weather visual effects: rain particles, lightning flashes, dynamic fog
 import * as THREE from 'three';
-import { aircraftState } from './aircraft.js';
-import { applyWeatherPreset as applyWeatherPhysics } from './weather.js';
+import { getActiveVehicle } from './vehicleState.js';
+import { applyWeatherPreset as applyWeatherPhysics, getWeatherState } from './weather.js';
 import { playThunder } from './audio.js';
+import { applyWeatherCloudProfile } from './terrain.js';
 
 let rainSystem = null;
 let lightningTimer = 0;
@@ -12,6 +13,7 @@ let sceneRef = null;
 let ambientRef = null;
 let fogRef = null;
 let originalAmbientIntensity = 0.7;
+let currentAmbientBaseline = 0.7;
 
 const RAIN_PARTICLE_COUNT = 1500;
 const RAIN_AREA = 150; // meters cube around camera
@@ -22,8 +24,8 @@ const RAIN_SPEED_MAX = 15;
 export const WEATHER_PRESETS = {
   clear: {
     fogDensity: 0.00004,
-    cloudCount: 60,
-    cloudOpacity: 0.12,
+    cloudCount: 180,
+    cloudOpacity: 0.28,
     rainIntensity: 0,
     windSpeed: 1.5,
     turbulence: 0.02,
@@ -31,8 +33,8 @@ export const WEATHER_PRESETS = {
   },
   overcast: {
     fogDensity: 0.00008,
-    cloudCount: 120,
-    cloudOpacity: 0.2,
+    cloudCount: 260,
+    cloudOpacity: 0.38,
     rainIntensity: 0,
     windSpeed: 3.0,
     turbulence: 0.05,
@@ -40,8 +42,8 @@ export const WEATHER_PRESETS = {
   },
   rain: {
     fogDensity: 0.00015,
-    cloudCount: 150,
-    cloudOpacity: 0.3,
+    cloudCount: 320,
+    cloudOpacity: 0.48,
     rainIntensity: 0.6,
     windSpeed: 5.0,
     turbulence: 0.1,
@@ -49,8 +51,8 @@ export const WEATHER_PRESETS = {
   },
   storm: {
     fogDensity: 0.00025,
-    cloudCount: 180,
-    cloudOpacity: 0.4,
+    cloudCount: 420,
+    cloudOpacity: 0.62,
     rainIntensity: 1.0,
     windSpeed: 10.0,
     turbulence: 0.25,
@@ -129,6 +131,9 @@ export function initWeatherFx(scene) {
     if (obj.isAmbientLight) ambientRef = obj;
   });
   fogRef = scene.fog;
+
+  // Apply default preset so cloud/fog/rain start in sync.
+  setWeatherPreset(currentPreset);
 }
 
 export function setWeatherPreset(presetName) {
@@ -150,6 +155,12 @@ export function setWeatherPreset(presetName) {
 
   // Sync wind/turbulence to weather physics
   applyWeatherPhysics(preset);
+
+  // Sync cloud visual profile
+  applyWeatherCloudProfile({
+    cloudCount: preset.cloudCount,
+    cloudOpacity: preset.cloudOpacity,
+  });
 }
 
 export function getCurrentPreset() {
@@ -165,22 +176,27 @@ export function cycleWeatherPreset() {
 }
 
 export function updateWeatherFx(dt) {
+  if (ambientRef && lightningFlash <= 0) {
+    currentAmbientBaseline = ambientRef.intensity;
+  }
+
   // Update rain particles
   if (rainSystem && rainIntensity > 0) {
     const posAttr = rainSystem.points.geometry.attributes.position;
     const positions = rainSystem.positions;
     const velocities = rainSystem.velocities;
 
-    const camX = aircraftState.position.x;
-    const camY = aircraftState.position.y;
-    const camZ = aircraftState.position.z;
+    const camX = getActiveVehicle().position.x;
+    const camY = getActiveVehicle().position.y;
+    const camZ = getActiveVehicle().position.z;
     const halfArea = RAIN_AREA / 2;
     const belowY = camY - halfArea;
     const topY = camY + halfArea;
 
-    // Wind drift (pre-multiply by dt)
-    const windDriftX = Math.sin(performance.now() * 0.001) * 2 * rainIntensity * dt;
-    const windDriftZ = windDriftX * 0.3;
+    const weather = getWeatherState();
+    const wind = weather ? weather.windVector : null;
+    const windDriftX = (wind ? wind.x : 0) * dt * (0.28 + rainIntensity * 0.22);
+    const windDriftZ = (wind ? wind.z : 0) * dt * (0.28 + rainIntensity * 0.22);
 
     for (let i = 0; i < RAIN_PARTICLE_COUNT; i++) {
       const i3 = i * 3;
@@ -212,15 +228,18 @@ export function updateWeatherFx(dt) {
     if (Math.random() < preset.lightningChance * dt) {
       lightningFlash = 1.0;
       playThunder();
+      if (ambientRef) {
+        currentAmbientBaseline = ambientRef.intensity;
+      }
 
       // Position lightning on horizon
       if (lightningSprite) {
         const angle = Math.random() * Math.PI * 2;
         const dist = 3000 + Math.random() * 2000;
         lightningSprite.position.set(
-          aircraftState.position.x + Math.cos(angle) * dist,
+          getActiveVehicle().position.x + Math.cos(angle) * dist,
           600 + Math.random() * 400,
-          aircraftState.position.z + Math.sin(angle) * dist
+          getActiveVehicle().position.z + Math.sin(angle) * dist
         );
         lightningSprite.visible = true;
         lightningSprite.material.opacity = 1.0;
@@ -234,7 +253,7 @@ export function updateWeatherFx(dt) {
 
     // Flash ambient light
     if (ambientRef) {
-      ambientRef.intensity = originalAmbientIntensity + lightningFlash * 4.0;
+      ambientRef.intensity = currentAmbientBaseline + lightningFlash * 4.0;
     }
 
     if (lightningSprite) {
@@ -247,7 +266,7 @@ export function updateWeatherFx(dt) {
     if (lightningFlash < 0.01) {
       lightningFlash = 0;
       if (ambientRef) {
-        ambientRef.intensity = originalAmbientIntensity;
+        ambientRef.intensity = currentAmbientBaseline;
       }
     }
   }
@@ -255,5 +274,8 @@ export function updateWeatherFx(dt) {
 
 export function setAmbientRef(light) {
   ambientRef = light;
-  if (light) originalAmbientIntensity = light.intensity;
+  if (light) {
+    originalAmbientIntensity = light.intensity;
+    currentAmbientBaseline = light.intensity;
+  }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { RUNWAY_LENGTH, RUNWAY_WIDTH, AIRPORT2_X, AIRPORT2_Z } from './constants.js';
+import { createAirportStructures } from './airportStructures.js';
 
 function createRunwayTexture() {
   const canvas = document.createElement('canvas');
@@ -120,6 +121,43 @@ function createAsphaltTexture(size) {
   return tex;
 }
 
+let runwayTextureCache = null;
+const asphaltTextureCache = new Map();
+
+function getRunwayTexture() {
+  if (!runwayTextureCache) runwayTextureCache = createRunwayTexture();
+  return runwayTextureCache;
+}
+
+function getAsphaltTexture(size) {
+  const key = Math.round(size);
+  if (!asphaltTextureCache.has(key)) {
+    asphaltTextureCache.set(key, createAsphaltTexture(size));
+  }
+  return asphaltTextureCache.get(key);
+}
+
+function addInstancedBoxes(scene, geometry, material, positions) {
+  if (!positions.length) return null;
+  const mesh = new THREE.InstancedMesh(geometry, material, positions.length);
+  const dummy = new THREE.Object3D();
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+    dummy.position.set(p.x, p.y, p.z);
+    dummy.rotation.set(0, p.ry || 0, 0);
+    dummy.scale.set(
+      p.sx === undefined ? 1 : p.sx,
+      p.sy === undefined ? 1 : p.sy,
+      p.sz === undefined ? 1 : p.sz
+    );
+    dummy.updateMatrix();
+    mesh.setMatrixAt(i, dummy.matrix);
+  }
+  mesh.instanceMatrix.needsUpdate = true;
+  scene.add(mesh);
+  return mesh;
+}
+
 export function isOnRunway(x, z) {
   // Airport 1 at origin
   if (Math.abs(x) < RUNWAY_WIDTH / 2 && Math.abs(z) < RUNWAY_LENGTH / 2) return true;
@@ -128,7 +166,15 @@ export function isOnRunway(x, z) {
   return false;
 }
 
-export function createRunway(scene) {
+export function buildAirport(scene, {
+  originX = 0,
+  originZ = 0,
+  includeApron = true,
+  includeTerminal = true,
+  includeExtras = true,
+} = {}) {
+  const ox = originX;
+  const oz = originZ;
   const halfLen = RUNWAY_LENGTH / 2;
   const halfWid = RUNWAY_WIDTH / 2;
 
@@ -136,266 +182,222 @@ export function createRunway(scene) {
   const runwayGeo = new THREE.PlaneGeometry(RUNWAY_WIDTH, RUNWAY_LENGTH);
   runwayGeo.rotateX(-Math.PI / 2);
   const runwayMat = new THREE.MeshStandardMaterial({
-    map: createRunwayTexture(),
+    map: getRunwayTexture(),
     roughness: 0.85,
     metalness: 0.0,
   });
   const runway = new THREE.Mesh(runwayGeo, runwayMat);
-  runway.position.y = 0.05;
+  runway.position.set(ox, 0.05, oz);
   runway.receiveShadow = true;
   scene.add(runway);
 
-  // ── Parallel Taxiway (100m east of runway, full length) ──
-  const parallelTaxiX = halfWid + 100;
-  const parallelTaxiLen = RUNWAY_LENGTH + 400; // extends beyond runway
+  // Parallel taxiway
+  const parallelTaxiX = ox + halfWid + 100;
+  const parallelTaxiLen = RUNWAY_LENGTH + 400;
   const taxiwayWid = 20;
 
   const parallelGeo = new THREE.PlaneGeometry(taxiwayWid, parallelTaxiLen);
   parallelGeo.rotateX(-Math.PI / 2);
   const taxiMat = new THREE.MeshStandardMaterial({
-    map: createAsphaltTexture(parallelTaxiLen),
+    map: getAsphaltTexture(parallelTaxiLen),
     roughness: 0.85,
     metalness: 0.0,
   });
   const parallelTaxiway = new THREE.Mesh(parallelGeo, taxiMat);
-  parallelTaxiway.position.set(parallelTaxiX, 0.04, 0);
+  parallelTaxiway.position.set(parallelTaxiX, 0.04, oz);
   parallelTaxiway.receiveShadow = true;
   scene.add(parallelTaxiway);
 
-  // Parallel taxiway center line
   const yellowMat = new THREE.MeshBasicMaterial({ color: 0xccaa00 });
   const ptLineGeo = new THREE.PlaneGeometry(0.6, parallelTaxiLen - 20);
   ptLineGeo.rotateX(-Math.PI / 2);
   const ptLine = new THREE.Mesh(ptLineGeo, yellowMat);
-  ptLine.position.set(parallelTaxiX, 0.06, 0);
+  ptLine.position.set(parallelTaxiX, 0.06, oz);
   scene.add(ptLine);
 
-  // Taxiway centerline embedded green lights (along parallel taxiway)
-  const taxiLightGeo = new THREE.BoxGeometry(0.3, 0.15, 0.3);
-  const taxiLightMat = new THREE.MeshStandardMaterial({
-    color: 0x00cc00, emissive: 0x00aa00, emissiveIntensity: 1.2,
-  });
-  for (let z = -halfLen; z <= halfLen; z += 30) {
-    const tl = new THREE.Mesh(taxiLightGeo, taxiLightMat);
-    tl.position.set(parallelTaxiX, 0.08, z);
-    scene.add(tl);
-  }
-
-  // ── Exit Taxiways (3 connectors from runway to parallel taxiway) ──
   const exitZPositions = [-600, 0, 600];
-  const exitLen = parallelTaxiX - halfWid;
+  const exitLen = parallelTaxiX - (ox + halfWid);
+  const taxiLightPositions = [];
+  for (let z = -halfLen; z <= halfLen; z += 30) {
+    taxiLightPositions.push({ x: parallelTaxiX, y: 0.08, z: oz + z });
+  }
 
   for (const ez of exitZPositions) {
     const exitGeo = new THREE.PlaneGeometry(exitLen + 10, taxiwayWid);
     exitGeo.rotateX(-Math.PI / 2);
-    const exitMesh = new THREE.Mesh(exitGeo, taxiMat.clone());
-    exitMesh.position.set(halfWid + exitLen / 2, 0.04, ez);
+    const exitMesh = new THREE.Mesh(exitGeo, taxiMat);
+    exitMesh.position.set(ox + halfWid + exitLen / 2, 0.04, oz + ez);
     exitMesh.receiveShadow = true;
     scene.add(exitMesh);
 
-    // Exit taxiway center line
     const exitLineGeo = new THREE.PlaneGeometry(exitLen - 5, 0.6);
     exitLineGeo.rotateX(-Math.PI / 2);
     const exitLine = new THREE.Mesh(exitLineGeo, yellowMat);
-    exitLine.position.set(halfWid + exitLen / 2, 0.06, ez);
+    exitLine.position.set(ox + halfWid + exitLen / 2, 0.06, oz + ez);
     scene.add(exitLine);
 
-    // Green centerline lights on exit taxiways
-    for (let x = halfWid + 10; x < parallelTaxiX; x += 15) {
-      const el = new THREE.Mesh(taxiLightGeo, taxiLightMat);
-      el.position.set(x, 0.08, ez);
-      scene.add(el);
+    for (let x = ox + halfWid + 10; x < parallelTaxiX; x += 15) {
+      taxiLightPositions.push({ x, y: 0.08, z: oz + ez });
     }
   }
 
-  // ── Hold Short Lines (at each runway entry point) ──
-  const holdShortMat = new THREE.MeshBasicMaterial({ color: 0xdddd00 });
-  for (const ez of exitZPositions) {
-    // Two solid + two dashed lines pattern
-    for (let i = -4; i <= 4; i++) {
-      const segGeo = new THREE.PlaneGeometry(0.4, 3);
-      segGeo.rotateX(-Math.PI / 2);
-      const seg = new THREE.Mesh(segGeo, holdShortMat);
-      seg.position.set(halfWid + 2, 0.07, ez + i * 3.5);
-      scene.add(seg);
-    }
-  }
-
-  // ── Taxiway Signage ──
-  createTaxiSign(scene, parallelTaxiX - 12, -600, 'A1', 'green');
-  createTaxiSign(scene, parallelTaxiX - 12, 0, 'A2', 'green');
-  createTaxiSign(scene, parallelTaxiX - 12, 600, 'A3', 'green');
-  createTaxiSign(scene, parallelTaxiX + 12, -300, 'A', 'yellow');
-  createTaxiSign(scene, parallelTaxiX + 12, 300, 'A', 'yellow');
-
-  // ── Connector taxiway to apron ──
-  const taxiwayLen = 150;
-  const connGeo = new THREE.PlaneGeometry(taxiwayLen, taxiwayWid);
-  connGeo.rotateX(-Math.PI / 2);
-  const connector = new THREE.Mesh(connGeo, taxiMat.clone());
-  connector.position.set(parallelTaxiX + taxiwayLen / 2, 0.04, 0);
-  connector.receiveShadow = true;
-  scene.add(connector);
-
-  // Connector center line
-  const connLineGeo = new THREE.PlaneGeometry(taxiwayLen - 10, 0.6);
-  connLineGeo.rotateX(-Math.PI / 2);
-  const connLine = new THREE.Mesh(connLineGeo, yellowMat);
-  connLine.position.set(parallelTaxiX + taxiwayLen / 2, 0.06, 0);
-  scene.add(connLine);
-
-  // ── Apron / parking area ──
-  const apronW = 250;
-  const apronH = 200;
-  const apronGeo = new THREE.PlaneGeometry(apronW, apronH);
-  apronGeo.rotateX(-Math.PI / 2);
-  const apronMat = new THREE.MeshStandardMaterial({
-    map: createAsphaltTexture(apronW),
-    roughness: 0.8,
-    metalness: 0.0,
+  const taxiLightMat = new THREE.MeshStandardMaterial({
+    color: 0x00cc00,
+    emissive: 0x00aa00,
+    emissiveIntensity: 1.2,
   });
-  const apron = new THREE.Mesh(apronGeo, apronMat);
-  apron.position.set(halfWid + taxiwayLen + apronW / 2 - 30, 0.03, 0);
-  apron.receiveShadow = true;
-  scene.add(apron);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(0.3, 0.15, 0.3), taxiLightMat, taxiLightPositions);
 
-  // Airport buildings
-  const buildingBaseX = halfWid + taxiwayLen + 60;
-  createTerminalBuilding(scene, buildingBaseX, -30);
-  createHangar(scene, buildingBaseX + 160, 50);
-  createHangar(scene, buildingBaseX + 160, -50);
-  createControlTower(scene, buildingBaseX + 80, 80);
-  createFuelStation(scene, buildingBaseX + 30, 55);
-  createGroundVehicles(scene, buildingBaseX + 20, 15);
-  createParkingGarage(scene, buildingBaseX + 130, -90);
+  if (includeApron) {
+    createTaxiSign(scene, parallelTaxiX - 12, oz - 600, 'A1', 'green');
+    createTaxiSign(scene, parallelTaxiX - 12, oz, 'A2', 'green');
+    createTaxiSign(scene, parallelTaxiX - 12, oz + 600, 'A3', 'green');
+    createTaxiSign(scene, parallelTaxiX + 12, oz - 300, 'A', 'yellow');
+    createTaxiSign(scene, parallelTaxiX + 12, oz + 300, 'A', 'yellow');
 
-  // Runway edge lights
-  const lightGeo = new THREE.BoxGeometry(0.4, 0.6, 0.4);
+    const taxiwayLen = 150;
+    const connGeo = new THREE.PlaneGeometry(taxiwayLen, taxiwayWid);
+    connGeo.rotateX(-Math.PI / 2);
+    const connector = new THREE.Mesh(connGeo, taxiMat);
+    connector.position.set(parallelTaxiX + taxiwayLen / 2, 0.04, oz);
+    connector.receiveShadow = true;
+    scene.add(connector);
+
+    const connLineGeo = new THREE.PlaneGeometry(taxiwayLen - 10, 0.6);
+    connLineGeo.rotateX(-Math.PI / 2);
+    const connLine = new THREE.Mesh(connLineGeo, yellowMat);
+    connLine.position.set(parallelTaxiX + taxiwayLen / 2, 0.06, oz);
+    scene.add(connLine);
+
+    const apronW = includeExtras ? 250 : 200;
+    const apronH = includeExtras ? 200 : 150;
+    const apronGeo = new THREE.PlaneGeometry(apronW, apronH);
+    apronGeo.rotateX(-Math.PI / 2);
+    const apronMat = new THREE.MeshStandardMaterial({
+      map: getAsphaltTexture(apronW),
+      roughness: 0.8,
+      metalness: 0.0,
+    });
+    const apron = new THREE.Mesh(apronGeo, apronMat);
+    apron.position.set(parallelTaxiX + 130, 0.03, oz);
+    apron.receiveShadow = true;
+    scene.add(apron);
+
+    if (includeTerminal) {
+      const buildingBaseX = parallelTaxiX + 60;
+      createTerminalBuilding(scene, buildingBaseX, oz - 30);
+      createHangar(scene, buildingBaseX + 160, oz + 50);
+      createHangar(scene, buildingBaseX + 160, oz - 50);
+      createControlTower(scene, buildingBaseX + 80, oz + 80);
+
+      if (includeExtras) {
+        createFuelStation(scene, buildingBaseX + 30, oz + 55);
+        createGroundVehicles(scene, buildingBaseX + 20, oz + 15);
+        createParkingGarage(scene, buildingBaseX + 130, oz - 90);
+
+        const gateLineMat = new THREE.MeshBasicMaterial({ color: 0xdddd00 });
+        const gatePositions = [
+          { x: ox + halfWid + 280, z: oz - 60, label: 'G1' },
+          { x: ox + halfWid + 280, z: oz - 20, label: 'G2' },
+          { x: ox + halfWid + 280, z: oz + 20, label: 'G3' },
+          { x: ox + halfWid + 280, z: oz + 60, label: 'G4' },
+        ];
+        for (const gate of gatePositions) {
+          const lineGeo = new THREE.PlaneGeometry(0.5, 20);
+          lineGeo.rotateX(-Math.PI / 2);
+          const guideLine = new THREE.Mesh(lineGeo, gateLineMat);
+          guideLine.position.set(gate.x, 0.06, gate.z);
+          scene.add(guideLine);
+
+          const crossGeo = new THREE.PlaneGeometry(10, 0.5);
+          crossGeo.rotateX(-Math.PI / 2);
+          const crossLine = new THREE.Mesh(crossGeo, gateLineMat);
+          crossLine.position.set(gate.x + 10, 0.06, gate.z);
+          scene.add(crossLine);
+
+          createTaxiSign(scene, gate.x + 12, gate.z, gate.label, 'blue');
+        }
+      }
+    }
+  }
+
+  const edgePositions = [];
+  for (let z = -halfLen; z <= halfLen; z += 60) {
+    edgePositions.push({ x: ox - (halfWid + 1.5), y: 0.35, z: oz + z });
+    edgePositions.push({ x: ox + (halfWid + 1.5), y: 0.35, z: oz + z });
+  }
   const edgeLightMat = new THREE.MeshStandardMaterial({
     color: 0xffcc00,
     emissive: 0xffaa00,
     emissiveIntensity: 0.8,
   });
-  const spacing = 60;
+  addInstancedBoxes(scene, new THREE.BoxGeometry(0.4, 0.6, 0.4), edgeLightMat, edgePositions);
 
-  for (let z = -halfLen; z <= halfLen; z += spacing) {
-    for (const side of [-1, 1]) {
-      const light = new THREE.Mesh(lightGeo, edgeLightMat);
-      light.position.set(side * (halfWid + 1.5), 0.35, z);
-      scene.add(light);
-    }
-  }
-
-  // Threshold lights
-  const greenMat = new THREE.MeshStandardMaterial({
-    color: 0x00ff00,
-    emissive: 0x00cc00,
-    emissiveIntensity: 1.0,
-  });
-  const redMat = new THREE.MeshStandardMaterial({
-    color: 0xff0000,
-    emissive: 0xcc0000,
-    emissiveIntensity: 1.0,
-  });
-  const threshLightGeo = new THREE.BoxGeometry(0.6, 0.4, 0.6);
-
+  const greenPositions = [];
+  const redPositions = [];
   for (let x = -halfWid + 2; x <= halfWid - 2; x += 3) {
-    const green = new THREE.Mesh(threshLightGeo, greenMat);
-    green.position.set(x, 0.25, -halfLen - 2);
-    scene.add(green);
-
-    const red = new THREE.Mesh(threshLightGeo, redMat);
-    red.position.set(x, 0.25, halfLen + 2);
-    scene.add(red);
+    greenPositions.push({ x: ox + x, y: 0.25, z: oz - halfLen - 2 });
+    redPositions.push({ x: ox + x, y: 0.25, z: oz + halfLen + 2 });
   }
+  const greenMat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00cc00, emissiveIntensity: 1.0 });
+  const redMat = new THREE.MeshStandardMaterial({ color: 0xff0000, emissive: 0xcc0000, emissiveIntensity: 1.0 });
+  addInstancedBoxes(scene, new THREE.BoxGeometry(0.6, 0.4, 0.6), greenMat, greenPositions);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(0.6, 0.4, 0.6), redMat, redPositions);
 
-  // PAPI lights
-  createPAPI(scene, -halfWid - 15, -halfLen + 300);
-  createPAPI(scene, halfWid + 15, halfLen - 300);
+  createPAPI(scene, ox - halfWid - 15, oz - halfLen + 300);
+  createPAPI(scene, ox + halfWid + 15, oz + halfLen - 300);
 
-  // Runway shoulders
   for (const side of [-1, 1]) {
     const shoulderGeo = new THREE.PlaneGeometry(15, RUNWAY_LENGTH + 40);
     shoulderGeo.rotateX(-Math.PI / 2);
-    const shoulderMat = new THREE.MeshStandardMaterial({
-      color: 0x5a8a3a,
-      roughness: 0.95,
-    });
+    const shoulderMat = new THREE.MeshStandardMaterial({ color: 0x5a8a3a, roughness: 0.95 });
     const shoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
-    shoulder.position.set(side * (halfWid + 8.5), 0.02, 0);
+    shoulder.position.set(ox + side * (halfWid + 8.5), 0.02, oz);
     shoulder.receiveShadow = true;
     scene.add(shoulder);
   }
 
-  // ── ILS Approach Lights (rows extending 300m before each threshold) ──
-  const ilsLightGeo = new THREE.BoxGeometry(0.5, 0.3, 0.5);
-  const ilsWhiteMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.4,
-  });
-  const ilsRedMat = new THREE.MeshStandardMaterial({
-    color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 1.0,
-  });
-
-  // Approach lights for runway 09 (south threshold, z = +halfLen)
+  const ilsWhitePositions = [];
+  const ilsRedPositions = [];
   for (let row = 1; row <= 10; row++) {
-    const zPos = halfLen + row * 30;
     const lightsInRow = row <= 3 ? 5 : 3;
     const spacing = row <= 3 ? 4 : 6;
-    const mat = row <= 2 ? ilsRedMat : ilsWhiteMat;
     for (let i = -Math.floor(lightsInRow / 2); i <= Math.floor(lightsInRow / 2); i++) {
-      const light = new THREE.Mesh(ilsLightGeo, mat);
-      light.position.set(i * spacing, 0.2 + row * 0.1, zPos);
-      scene.add(light);
+      const pSouth = { x: ox + i * spacing, y: 0.2 + row * 0.1, z: oz + halfLen + row * 30 };
+      const pNorth = { x: ox + i * spacing, y: 0.2 + row * 0.1, z: oz - halfLen - row * 30 };
+      if (row <= 2) {
+        ilsRedPositions.push(pSouth, pNorth);
+      } else {
+        ilsWhitePositions.push(pSouth, pNorth);
+      }
     }
   }
+  const ilsWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.4 });
+  const ilsRedMat = new THREE.MeshStandardMaterial({ color: 0xff2200, emissive: 0xff2200, emissiveIntensity: 1.0 });
+  addInstancedBoxes(scene, new THREE.BoxGeometry(0.5, 0.3, 0.5), ilsWhiteMat, ilsWhitePositions);
+  addInstancedBoxes(scene, new THREE.BoxGeometry(0.5, 0.3, 0.5), ilsRedMat, ilsRedPositions);
 
-  // Approach lights for runway 27 (north threshold, z = -halfLen)
-  for (let row = 1; row <= 10; row++) {
-    const zPos = -halfLen - row * 30;
-    const lightsInRow = row <= 3 ? 5 : 3;
-    const spacing = row <= 3 ? 4 : 6;
-    const mat = row <= 2 ? ilsRedMat : ilsWhiteMat;
-    for (let i = -Math.floor(lightsInRow / 2); i <= Math.floor(lightsInRow / 2); i++) {
-      const light = new THREE.Mesh(ilsLightGeo, mat);
-      light.position.set(i * spacing, 0.2 + row * 0.1, zPos);
-      scene.add(light);
-    }
-  }
+  createWindsock(scene, ox + halfWid + 25, oz - halfLen + 100);
+  return runway;
+}
 
-  // ── Gate / Parking Position Markings ──
-  const gateLineMat = new THREE.MeshBasicMaterial({ color: 0xdddd00 });
-  const gatePositions = [
-    { x: halfWid + 280, z: -60, label: 'G1' },
-    { x: halfWid + 280, z: -20, label: 'G2' },
-    { x: halfWid + 280, z: 20, label: 'G3' },
-    { x: halfWid + 280, z: 60, label: 'G4' },
-  ];
-
-  for (const gate of gatePositions) {
-    // Parking guide line (T-shape)
-    const lineGeo = new THREE.PlaneGeometry(0.5, 20);
-    lineGeo.rotateX(-Math.PI / 2);
-    const guideLine = new THREE.Mesh(lineGeo, gateLineMat);
-    guideLine.position.set(gate.x, 0.06, gate.z);
-    scene.add(guideLine);
-
-    // Cross bar of the T
-    const crossGeo = new THREE.PlaneGeometry(10, 0.5);
-    crossGeo.rotateX(-Math.PI / 2);
-    const crossLine = new THREE.Mesh(crossGeo, gateLineMat);
-    crossLine.position.set(gate.x + 10, 0.06, gate.z);
-    scene.add(crossLine);
-
-    // Gate number sign
-    createTaxiSign(scene, gate.x + 12, gate.z, gate.label, 'blue');
-  }
-
-  // Windsock
-  createWindsock(scene, halfWid + 25, -halfLen + 100);
-
-  // Second airport
-  createSecondAirport(scene);
-
+export function createRunway(scene) {
+  const runway = buildAirport(scene, {
+    originX: 0,
+    originZ: 0,
+    includeApron: true,
+    includeTerminal: true,
+    includeExtras: true,
+  });
+  buildAirport(scene, {
+    originX: AIRPORT2_X,
+    originZ: AIRPORT2_Z,
+    includeApron: true,
+    includeTerminal: true,
+    includeExtras: false,
+  });
+  createAirportStructures(scene, 0, 0, true);
+  createAirportStructures(scene, AIRPORT2_X, AIRPORT2_Z, false);
   return runway;
 }
 
@@ -858,173 +860,13 @@ function createTaxiSign(scene, x, z, text, style) {
 }
 
 function createSecondAirport(scene) {
-  const ox = AIRPORT2_X;
-  const oz = AIRPORT2_Z;
-  const halfLen = RUNWAY_LENGTH / 2;
-  const halfWid = RUNWAY_WIDTH / 2;
-
-  // ── Runway surface ──
-  const runwayGeo = new THREE.PlaneGeometry(RUNWAY_WIDTH, RUNWAY_LENGTH);
-  runwayGeo.rotateX(-Math.PI / 2);
-  const runwayMat = new THREE.MeshStandardMaterial({
-    map: createRunwayTexture(),
-    roughness: 0.85,
-    metalness: 0.0,
+  return buildAirport(scene, {
+    originX: AIRPORT2_X,
+    originZ: AIRPORT2_Z,
+    includeApron: true,
+    includeTerminal: true,
+    includeExtras: false,
   });
-  const runway = new THREE.Mesh(runwayGeo, runwayMat);
-  runway.position.set(ox, 0.05, oz);
-  runway.receiveShadow = true;
-  scene.add(runway);
-
-  // ── Parallel Taxiway ──
-  const parallelTaxiX = ox + halfWid + 100;
-  const parallelTaxiLen = RUNWAY_LENGTH + 400;
-  const taxiwayWid = 20;
-
-  const parallelGeo = new THREE.PlaneGeometry(taxiwayWid, parallelTaxiLen);
-  parallelGeo.rotateX(-Math.PI / 2);
-  const taxiMat = new THREE.MeshStandardMaterial({
-    map: createAsphaltTexture(parallelTaxiLen),
-    roughness: 0.85,
-  });
-  const parallelTaxiway = new THREE.Mesh(parallelGeo, taxiMat);
-  parallelTaxiway.position.set(parallelTaxiX, 0.04, oz);
-  parallelTaxiway.receiveShadow = true;
-  scene.add(parallelTaxiway);
-
-  // Parallel taxiway center line
-  const yellowMat = new THREE.MeshBasicMaterial({ color: 0xccaa00 });
-  const ptLineGeo = new THREE.PlaneGeometry(0.6, parallelTaxiLen - 20);
-  ptLineGeo.rotateX(-Math.PI / 2);
-  const ptLine = new THREE.Mesh(ptLineGeo, yellowMat);
-  ptLine.position.set(parallelTaxiX, 0.06, oz);
-  scene.add(ptLine);
-
-  // Taxiway centerline lights
-  const taxiLightGeo = new THREE.BoxGeometry(0.3, 0.15, 0.3);
-  const taxiLightMat = new THREE.MeshStandardMaterial({
-    color: 0x00cc00, emissive: 0x00aa00, emissiveIntensity: 1.2,
-  });
-  for (let z = -halfLen; z <= halfLen; z += 30) {
-    const tl = new THREE.Mesh(taxiLightGeo, taxiLightMat);
-    tl.position.set(parallelTaxiX, 0.08, oz + z);
-    scene.add(tl);
-  }
-
-  // ── Exit Taxiways ──
-  const exitZPositions = [-600, 0, 600];
-  const exitLen = parallelTaxiX - (ox + halfWid);
-
-  for (const ez of exitZPositions) {
-    const exitGeo = new THREE.PlaneGeometry(exitLen + 10, taxiwayWid);
-    exitGeo.rotateX(-Math.PI / 2);
-    const exitMesh = new THREE.Mesh(exitGeo, taxiMat.clone());
-    exitMesh.position.set(ox + halfWid + exitLen / 2, 0.04, oz + ez);
-    exitMesh.receiveShadow = true;
-    scene.add(exitMesh);
-
-    // Exit taxiway center line
-    const exitLineGeo = new THREE.PlaneGeometry(exitLen - 5, 0.6);
-    exitLineGeo.rotateX(-Math.PI / 2);
-    const exitLine = new THREE.Mesh(exitLineGeo, yellowMat);
-    exitLine.position.set(ox + halfWid + exitLen / 2, 0.06, oz + ez);
-    scene.add(exitLine);
-  }
-
-  // ── Apron ──
-  const apronW = 200;
-  const apronH = 150;
-  const apronGeo = new THREE.PlaneGeometry(apronW, apronH);
-  apronGeo.rotateX(-Math.PI / 2);
-  const apronMat = new THREE.MeshStandardMaterial({
-    map: createAsphaltTexture(apronW),
-    roughness: 0.8,
-  });
-  const apron = new THREE.Mesh(apronGeo, apronMat);
-  apron.position.set(parallelTaxiX + 130, 0.03, oz);
-  apron.receiveShadow = true;
-  scene.add(apron);
-
-  // ── Buildings ──
-  const buildingBaseX = parallelTaxiX + 60;
-  createTerminalBuilding(scene, buildingBaseX, oz - 30);
-  createHangar(scene, buildingBaseX + 160, oz + 40);
-  createControlTower(scene, buildingBaseX + 80, oz + 70);
-
-  // ── Runway edge lights ──
-  const lightGeo = new THREE.BoxGeometry(0.4, 0.6, 0.4);
-  const edgeLightMat = new THREE.MeshStandardMaterial({
-    color: 0xffcc00, emissive: 0xffaa00, emissiveIntensity: 0.8,
-  });
-  const spacing = 60;
-  for (let z = -halfLen; z <= halfLen; z += spacing) {
-    for (const side of [-1, 1]) {
-      const light = new THREE.Mesh(lightGeo, edgeLightMat);
-      light.position.set(ox + side * (halfWid + 1.5), 0.35, oz + z);
-      scene.add(light);
-    }
-  }
-
-  // Threshold lights
-  const greenMat = new THREE.MeshStandardMaterial({
-    color: 0x00ff00, emissive: 0x00cc00, emissiveIntensity: 1.0,
-  });
-  const redMat = new THREE.MeshStandardMaterial({
-    color: 0xff0000, emissive: 0xcc0000, emissiveIntensity: 1.0,
-  });
-  const threshLightGeo = new THREE.BoxGeometry(0.6, 0.4, 0.6);
-  for (let x = -halfWid + 2; x <= halfWid - 2; x += 3) {
-    const green = new THREE.Mesh(threshLightGeo, greenMat);
-    green.position.set(ox + x, 0.25, oz - halfLen - 2);
-    scene.add(green);
-    const red = new THREE.Mesh(threshLightGeo, redMat);
-    red.position.set(ox + x, 0.25, oz + halfLen + 2);
-    scene.add(red);
-  }
-
-  // PAPI lights
-  createPAPI(scene, ox - halfWid - 15, oz - halfLen + 300);
-  createPAPI(scene, ox + halfWid + 15, oz + halfLen - 300);
-
-  // Runway shoulders
-  for (const side of [-1, 1]) {
-    const shoulderGeo = new THREE.PlaneGeometry(15, RUNWAY_LENGTH + 40);
-    shoulderGeo.rotateX(-Math.PI / 2);
-    const shoulderMat = new THREE.MeshStandardMaterial({ color: 0x5a8a3a, roughness: 0.95 });
-    const shoulder = new THREE.Mesh(shoulderGeo, shoulderMat);
-    shoulder.position.set(ox + side * (halfWid + 8.5), 0.02, oz);
-    shoulder.receiveShadow = true;
-    scene.add(shoulder);
-  }
-
-  // ILS approach lights
-  const ilsLightGeo = new THREE.BoxGeometry(0.5, 0.3, 0.5);
-  const ilsWhiteMat = new THREE.MeshStandardMaterial({
-    color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 0.4,
-  });
-  for (let row = 1; row <= 8; row++) {
-    const zPos = oz + halfLen + row * 30;
-    const lightsInRow = row <= 3 ? 5 : 3;
-    const sp = row <= 3 ? 4 : 6;
-    for (let i = -Math.floor(lightsInRow / 2); i <= Math.floor(lightsInRow / 2); i++) {
-      const light = new THREE.Mesh(ilsLightGeo, ilsWhiteMat);
-      light.position.set(ox + i * sp, 0.2 + row * 0.1, zPos);
-      scene.add(light);
-    }
-  }
-  for (let row = 1; row <= 8; row++) {
-    const zPos = oz - halfLen - row * 30;
-    const lightsInRow = row <= 3 ? 5 : 3;
-    const sp = row <= 3 ? 4 : 6;
-    for (let i = -Math.floor(lightsInRow / 2); i <= Math.floor(lightsInRow / 2); i++) {
-      const light = new THREE.Mesh(ilsLightGeo, ilsWhiteMat);
-      light.position.set(ox + i * sp, 0.2 + row * 0.1, zPos);
-      scene.add(light);
-    }
-  }
-
-  // Windsock
-  createWindsock(scene, ox + halfWid + 25, oz - halfLen + 100);
 }
 
 function createWindsock(scene, x, z) {

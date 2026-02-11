@@ -28,7 +28,7 @@
           <div class="menu-btn" id="menu-main-controls">CONTROLS</div>
         </div>
         <div class="menu-footer">
-          4 AIRCRAFT &middot; DYNAMIC WEATHER &middot; DAY/NIGHT CYCLE &middot; AUTOPILOT &middot; ILS LANDING
+          5 AIRCRAFT &middot; DYNAMIC WEATHER &middot; DAY/NIGHT CYCLE &middot; AUTOPILOT &middot; ILS LANDING
         </div>
       </div>
 
@@ -63,10 +63,29 @@
             </div>
           </div>
           <div class="settings-row">
+            <label class="settings-label">GRAPHICS QUALITY</label>
+            <div class="settings-control">
+              <select id="setting-graphics" class="settings-select">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high" selected>High</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-row">
             <label class="settings-label">GPWS CALLOUTS</label>
             <div class="settings-control">
               <label class="toggle-switch">
                 <input type="checkbox" id="setting-gpws" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">SHOW FPS</label>
+            <div class="settings-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-fps">
                 <span class="toggle-track"></span>
               </label>
             </div>
@@ -268,8 +287,30 @@
           <div class="score-row"><span class="score-label">SPEED</span><span id="score-speed" class="score-value">125 KTS</span></div>
         </div>
         <div id="score-best" class="score-best">NEW BEST!</div>
-        <div class="score-hint">PRESS R TO RETRY</div>
+        <div class="score-hint">TAP TO CLOSE · R TO RETRY</div>
       </div>
+
+      <!-- Daily Challenge Briefing -->
+      <div id="daily-briefing" class="glass-panel" style="display: none;">
+        <div class="score-header">DAILY CHALLENGE</div>
+        <div id="daily-seed" class="score-total"></div>
+        <div class="score-details">
+          <div class="score-row"><span class="score-label">AIRCRAFT</span><span id="daily-aircraft" class="score-value"></span></div>
+          <div class="score-row"><span class="score-label">APPROACH</span><span id="daily-approach" class="score-value"></span></div>
+          <div class="score-row"><span class="score-label">WIND</span><span id="daily-wind" class="score-value"></span></div>
+          <div class="score-row"><span class="score-label">EMERGENCY</span><span id="daily-emergency" class="score-value"></span></div>
+        </div>
+        <div class="score-hint">TAP TO DISMISS</div>
+      </div>
+
+      <!-- Speedrun Timer -->
+      <div id="speedrun-timer" class="speedrun-timer" style="display: none;">
+        <div class="speedrun-label">SPEED RUN</div>
+        <div id="speedrun-time" class="speedrun-time-value">0:00.0</div>
+      </div>
+
+      <!-- Engine Failure Warning -->
+      <div id="engine-fail-warning" class="engine-fail-warning" style="display: none;">ENGINE FAILURE</div>
 
       <!-- Stall warning overlay -->
       <div id="hud-stall-warning" class="stall-warning" style="display: none;">STALL</div>
@@ -311,6 +352,7 @@
       <div class="aircraft-option" data-type="boeing_737">2. Boeing 737</div>
       <div class="aircraft-option" data-type="f16">3. F-16 Falcon</div>
       <div class="aircraft-option" data-type="airbus_a320">4. Airbus A320</div>
+      <div class="aircraft-option" data-type="dhc2_beaver">5. DHC-2 Beaver (Seaplane)</div>
       <div class="select-divider"></div>
       <div class="select-title">START POSITION - AIRPORT 1</div>
       <div class="spawn-option selected" data-spawn="runway">Runway</div>
@@ -323,8 +365,28 @@
       <div class="spawn-option" data-spawn="short_final">Short Final (1.5nm / 500ft)</div>
       <div class="spawn-option" data-spawn="long_final">Long Final (3nm / 1000ft)</div>
       <div class="select-divider"></div>
+      <div class="select-title">CROSSWIND CHALLENGE</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="crosswind_light">Light Crosswind (8kt)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="crosswind_moderate">Moderate Crosswind (18kt)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="crosswind_strong">Strong Crosswind (30kt)</div>
+      <div class="select-divider"></div>
+      <div class="select-title">SPECIAL CHALLENGES</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="engine_out">Engine Out Emergency</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="speedrun">Speed Run (APT1 → APT2)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="daily_challenge">Daily Challenge</div>
+      <div class="select-divider"></div>
+      <div class="select-title">BEACH / WATER</div>
+      <div class="spawn-option" data-spawn="seaplane_water">Beach (Water)</div>
+      <div class="select-divider"></div>
+      <div class="select-title">CITY DRIVING</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="city_sedan">Sedan</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="city_sports">Sports Car</div>
+      <div class="select-divider"></div>
       <div class="start-btn" id="start-btn">START</div>
     </div>
+
+    <!-- FPS overlay -->
+    <div id="perf-overlay" style="display:none;"></div>
 
     <!-- Controls hint -->
     <div id="controls-help">

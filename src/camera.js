@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { aircraftState, setCockpitVisible } from './aircraft.js';
+import { setCockpitVisible } from './aircraft.js';
+import { getActiveVehicle, isAircraft } from './vehicleState.js';
 import { getWeatherState } from './weather.js';
 import {
   CHASE_DISTANCE,
@@ -22,6 +23,7 @@ let replayMode = false;
 const _targetPos = new THREE.Vector3();
 const _lookTarget = new THREE.Vector3();
 const _forward = new THREE.Vector3();
+const _up = new THREE.Vector3();
 
 // Orbit camera state
 let orbitYaw = 0;
@@ -74,11 +76,11 @@ export function initCamera() {
         setCockpitVisible(false);
       }
       mode = 'orbit';
-      const dx = camera.position.x - aircraftState.position.x;
-      const dz = camera.position.z - aircraftState.position.z;
+      const dx = camera.position.x - getActiveVehicle().position.x;
+      const dz = camera.position.z - getActiveVehicle().position.z;
       orbitYaw = Math.atan2(dx, dz);
       orbitPitch = 0.3;
-      orbitDist = CHASE_DISTANCE;
+      orbitDist = isAircraft(getActiveVehicle()) ? CHASE_DISTANCE : 8;
     }
   });
 
@@ -108,13 +110,13 @@ export function initCamera() {
         setCockpitVisible(false);
       }
       mode = 'orbit';
-      const dx = camera.position.x - aircraftState.position.x;
-      const dz = camera.position.z - aircraftState.position.z;
+      const dx = camera.position.x - getActiveVehicle().position.x;
+      const dz = camera.position.z - getActiveVehicle().position.z;
       orbitYaw = Math.atan2(dx, dz);
       orbitPitch = 0.3;
-      orbitDist = CHASE_DISTANCE;
+      orbitDist = isAircraft(getActiveVehicle()) ? CHASE_DISTANCE : 8;
     }
-    orbitDist = clamp(orbitDist + e.deltaY * 0.05, 10, 120);
+    orbitDist = clamp(orbitDist + e.deltaY * 0.05, 3, 120);
     orbitReturnTimer = 3.0;
   }, { passive: false });
 
@@ -163,7 +165,7 @@ export function triggerLandingShake(intensity) {
 export function updateCamera(dt) {
   if (!camera) return;
 
-  const state = aircraftState;
+  const state = getActiveVehicle();
   _forward.set(0, 0, -1).applyQuaternion(state.quaternion).normalize();
 
   // Decay landing shake
@@ -233,23 +235,34 @@ export function updateCamera(dt) {
   }
 
   if (mode === 'chase') {
-    // Camera follows behind and slightly above the aircraft,
-    // partially following pitch so it doesn't feel like rotation from the tail
-    const _up = new THREE.Vector3(0, 1, 0).applyQuaternion(state.quaternion).normalize();
-    _targetPos.copy(state.position);
-    _targetPos.addScaledVector(_forward, -CHASE_DISTANCE);
-    // Blend between world-up offset and aircraft-up offset (30% pitch follow)
-    _targetPos.y = state.position.y + CHASE_HEIGHT * 0.7;
-    _targetPos.addScaledVector(_up, CHASE_HEIGHT * 0.3);
+    // Vehicle-specific chase parameters
+    const isPlane = isAircraft(state);
+    const chaseDist = isPlane ? CHASE_DISTANCE : 6;
+    const chaseHeight = isPlane ? CHASE_HEIGHT : 2.5;
+    const lookAhead = isPlane ? 30 : 15;
 
-    const t = 1 - Math.exp(-CHASE_LERP_SPEED * 2.0 * dt);
+    // Camera follows behind and slightly above the vehicle
+    _up.set(0, 1, 0).applyQuaternion(state.quaternion).normalize();
+    _targetPos.copy(state.position);
+    _targetPos.addScaledVector(_forward, -chaseDist);
+    if (isPlane) {
+      // Blend between world-up offset and aircraft-up offset (30% pitch follow)
+      _targetPos.y = state.position.y + chaseHeight * 0.7;
+      _targetPos.addScaledVector(_up, chaseHeight * 0.3);
+    } else {
+      _targetPos.y = state.position.y + chaseHeight;
+    }
+
+    // Aircraft: smooth follow. Cars: very tight spring (almost locked, slight give for feel)
+    const lerpRate = isPlane ? CHASE_LERP_SPEED * 2.0 : 60.0;
+    const t = 1 - Math.exp(-lerpRate * dt);
     camera.position.x = lerp(camera.position.x, _targetPos.x, t);
     camera.position.y = lerp(camera.position.y, _targetPos.y, t);
     camera.position.z = lerp(camera.position.z, _targetPos.z, t);
 
     camera.position.add(shakeOffset);
 
-    _lookTarget.copy(state.position).addScaledVector(_forward, 30);
+    _lookTarget.copy(state.position).addScaledVector(_forward, lookAhead);
     camera.lookAt(_lookTarget);
 
   } else if (mode === 'cockpit') {
@@ -293,7 +306,7 @@ export function setReplayCameraMode(enabled) {
     // Switch to orbit mode for free camera
     mode = 'orbit';
     orbitReturnTimer = 0;
-    const state = aircraftState;
+    const state = getActiveVehicle();
     const dx = camera.position.x - state.position.x;
     const dz = camera.position.z - state.position.z;
     orbitYaw = Math.atan2(dx, dz);
@@ -316,9 +329,12 @@ function computeModePosition(mode, state) {
   _forward.set(0, 0, -1).applyQuaternion(state.quaternion).normalize();
 
   if (mode === 'chase') {
+    const isPlane = isAircraft(state);
+    const chaseDist = isPlane ? CHASE_DISTANCE : 6;
+    const chaseHeight = isPlane ? CHASE_HEIGHT : 2.5;
     _targetPos.copy(state.position);
-    _targetPos.addScaledVector(_forward, -CHASE_DISTANCE);
-    _targetPos.y = state.position.y + CHASE_HEIGHT;
+    _targetPos.addScaledVector(_forward, -chaseDist);
+    _targetPos.y = state.position.y + chaseHeight;
   } else if (mode === 'cockpit') {
     const type = getAircraftType(state.currentType);
     const cpY = type.cockpitY || COCKPIT_OFFSET_Y;
