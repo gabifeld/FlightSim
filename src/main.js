@@ -32,6 +32,7 @@ import { initMobile, updateMobile } from './mobile.js';
 import { initAutopilot } from './autopilot.js';
 import { initMenu, isPaused, isMenuOpen, setMenuCallbacks, onGameStart } from './menu.js';
 import { createCity, updateCityNight } from './city.js';
+import { createCapeTownCity, updateCapeTownNight } from './capeTownCity.js';
 import { createCoastal } from './coastal.js';
 import { updateChallenge, resetChallenge, setSpeedrunCallback, formatTime } from './challenges.js';
 import { applyGraphicsQuality } from './graphics.js';
@@ -71,6 +72,7 @@ createRuralStructures(scene);
 createRockFormations(scene);
 createWildflowers(scene);
 createCity(scene);
+createCapeTownCity(scene);
 createCoastal(scene);
 createClouds(scene);
 createAircraft(scene);
@@ -289,6 +291,7 @@ function gameLoop(time) {
   setNightMode(nightActive);
   updateAirportLights(dt);
   updateCityNight(nightActive);
+  updateCapeTownNight(nightActive);
 
   // Post-processing adjustments (night bloom)
   updatePostProcessing();

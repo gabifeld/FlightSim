@@ -16,6 +16,14 @@ import {
   COAST_LINE_X,
   OCEAN_DEPTH,
   COAST_MARGIN,
+  CT_CENTER_X,
+  CT_CENTER_Z,
+  CT_SIZE_X,
+  CT_SIZE_Z,
+  TABLE_MTN_X,
+  TABLE_MTN_Z,
+  SIGNAL_HILL_X,
+  SIGNAL_HILL_Z,
 } from './constants.js';
 import { smoothstep } from './utils.js';
 import { getSunDirection } from './scene.js';
@@ -42,6 +50,16 @@ const HIGHWAY_CENTERLINE = [
   [7000, -7000],
   [7600, -7400],
   [AIRPORT2_X, AIRPORT2_Z + 200],
+];
+
+// Highway spur from inland city toward Cape Town
+const HIGHWAY_SPUR_CT = [
+  [CITY_CENTER_X + 1200, CITY_CENTER_Z + 1000],
+  [6400, -1800],
+  [7600, -800],
+  [8600, -200],
+  [9200, 0],
+  [CT_CENTER_X, CT_CENTER_Z],
 ];
 
 function sampleNoise(x, z) {
@@ -97,13 +115,11 @@ function cityFlattenFactor(x, z) {
   return 1 - smoothstep(0, margin, dist);
 }
 
-function highwayFlattenFactor(x, z) {
-  const roadHalfWidth = 20;
-  const margin = 40;
+function segmentMinDist(x, z, segments) {
   let minDist = Infinity;
-  for (let i = 0; i < HIGHWAY_CENTERLINE.length - 1; i++) {
-    const ax = HIGHWAY_CENTERLINE[i][0], az = HIGHWAY_CENTERLINE[i][1];
-    const bx = HIGHWAY_CENTERLINE[i + 1][0], bz = HIGHWAY_CENTERLINE[i + 1][1];
+  for (let i = 0; i < segments.length - 1; i++) {
+    const ax = segments[i][0], az = segments[i][1];
+    const bx = segments[i + 1][0], bz = segments[i + 1][1];
     const dx = bx - ax, dz = bz - az;
     const lenSq = dx * dx + dz * dz;
     const t = Math.max(0, Math.min(1, ((x - ax) * dx + (z - az) * dz) / lenSq));
@@ -111,7 +127,64 @@ function highwayFlattenFactor(x, z) {
     const dist = Math.sqrt((x - px) * (x - px) + (z - pz) * (z - pz));
     if (dist < minDist) minDist = dist;
   }
+  return minDist;
+}
+
+function highwayFlattenFactor(x, z) {
+  const roadHalfWidth = 20;
+  const margin = 40;
+  const minDist = Math.min(
+    segmentMinDist(x, z, HIGHWAY_CENTERLINE),
+    segmentMinDist(x, z, HIGHWAY_SPUR_CT)
+  );
   return (1 - smoothstep(0, margin, Math.max(0, minDist - roadHalfWidth))) * 0.7;
+}
+
+// Cape Town city flatten — full for CBD/east, partial in Bo-Kaap for hillside effect
+function capeTownFlattenFactor(x, z) {
+  const halfX = CT_SIZE_X / 2;
+  const halfZ = CT_SIZE_Z / 2;
+  const margin = 400;
+  const dx = Math.max(0, Math.abs(x - CT_CENTER_X) - halfX);
+  const dz = Math.max(0, Math.abs(z - CT_CENTER_Z) - halfZ);
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  let f = 1 - smoothstep(0, margin, dist);
+  // Reduce flattening in Bo-Kaap / western zone so terrain rises for hillside houses
+  if (x < 9200 && f > 0) {
+    const westFade = smoothstep(8000, 9200, x); // 0 at Table Mtn edge, 1 at CBD
+    f *= 0.3 + 0.7 * westFade;
+  }
+  return f;
+}
+
+// Table Mountain — flat-topped mesa 1200x2000m at 280m
+function tableMountainHeight(x, z) {
+  const cx = TABLE_MTN_X, cz = TABLE_MTN_Z;
+  const halfW = 600, halfD = 1000;
+  const plateauH = 280;
+  // Distance from plateau edge
+  const edgeX = Math.max(0, Math.abs(x - cx) - halfW);
+  const edgeZ = Math.max(0, Math.abs(z - cz) - halfD);
+
+  // Steep cliffs on W, N, S (200m margin); gentler eastern slope (400m)
+  const isEast = x > cx + halfW;
+  const cliffMarginX = isEast ? 400 : 200;
+  const cliffMarginZ = 200;
+
+  const fx = 1 - smoothstep(0, cliffMarginX, edgeX);
+  const fz = 1 - smoothstep(0, cliffMarginZ, edgeZ);
+  return plateauH * fx * fz;
+}
+
+// Signal Hill — rounded hill r=400m, h=120m, gaussian falloff
+function signalHillHeight(x, z) {
+  const cx = SIGNAL_HILL_X, cz = SIGNAL_HILL_Z;
+  const r = 400, h = 120;
+  const dx = x - cx, dz = z - cz;
+  const distSq = dx * dx + dz * dz;
+  const rSq = r * r;
+  if (distSq > rSq * 4) return 0; // early out
+  return h * Math.exp(-distSq / (2 * rSq * 0.18));
 }
 
 function runwayFlattenFactor(x, z) {
@@ -121,7 +194,8 @@ function runwayFlattenFactor(x, z) {
   const f2 = airportFlattenFactor(x, z, AIRPORT2_X, AIRPORT2_Z);
   const f3 = cityFlattenFactor(x, z);
   const f4 = highwayFlattenFactor(x, z);
-  return Math.max(f1, f2, f3, f4);
+  const f5 = capeTownFlattenFactor(x, z);
+  return Math.max(f1, f2, f3, f4, f5);
 }
 
 // Ocean depression — creates coastline along eastern edge of map
@@ -141,10 +215,13 @@ export function getTerrainHeight(x, z) {
   const flatten = runwayFlattenFactor(x, z);
   const landHeight = rawHeight * (1 - flatten);
 
+  // Add Table Mountain and Signal Hill
+  const withMountains = Math.max(landHeight, tableMountainHeight(x, z), signalHillHeight(x, z));
+
   // Apply ocean depression east of coastline
   const ocean = oceanFactor(x, z);
-  if (ocean <= 0) return landHeight;
-  return landHeight * (1 - ocean) - ocean * OCEAN_DEPTH;
+  if (ocean <= 0) return withMountains;
+  return withMountains * (1 - ocean) - ocean * OCEAN_DEPTH;
 }
 
 export function isInOcean(x, z) {
@@ -468,6 +545,12 @@ function isInCityZone(x, z) {
   return Math.abs(x - CITY_CENTER_X) < halfSize && Math.abs(z - CITY_CENTER_Z) < halfSize;
 }
 
+function isInCapeTownZone(x, z) {
+  const halfX = CT_SIZE_X / 2 + 100;
+  const halfZ = CT_SIZE_Z / 2 + 100;
+  return Math.abs(x - CT_CENTER_X) < halfX && Math.abs(z - CT_CENTER_Z) < halfZ;
+}
+
 // Check if position is near any road segment
 function isNearRoad(x, z) {
   if (!highwaySamplePoints) return false;
@@ -707,6 +790,7 @@ export function createVegetation(scene) {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
     if (isNearRoad(x, z)) continue;
 
     const h = getTerrainHeight(x, z);
@@ -729,6 +813,7 @@ export function createVegetation(scene) {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
     if (isNearRoad(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h > TERRAIN_MAX_HEIGHT * 0.35 || h < 3) continue;
@@ -742,6 +827,7 @@ export function createVegetation(scene) {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h > TERRAIN_MAX_HEIGHT * 0.55 || h < 3) continue;
     if (deadTreePositions.length >= vegetationProfile.deadTrees) break;
@@ -848,6 +934,7 @@ export function createRuralStructures(scene) {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.8;
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h < 2 || h > TERRAIN_MAX_HEIGHT * 0.2) continue;
     farmPositions.push({
@@ -905,6 +992,7 @@ export function createRuralStructures(scene) {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.8;
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h < 2 || h > TERRAIN_MAX_HEIGHT * 0.2) continue;
     barnPositions.push({
@@ -1148,6 +1236,49 @@ export function createHighway(scene) {
   const roadMesh = new THREE.Mesh(roadGeo, roadMat);
   roadMesh.receiveShadow = true;
   scene.add(roadMesh);
+
+  // ── Cape Town highway spur ──
+  const spurControlPoints = HIGHWAY_SPUR_CT.map(([sx, sz]) => {
+    const sy = getTerrainHeight(sx, sz) + 0.2;
+    return new THREE.Vector3(sx, sy, sz);
+  });
+  const spurCurve = new THREE.CatmullRomCurve3(spurControlPoints, false, 'catmullrom', 0.3);
+  const spurSegs = 150;
+  const spurRoadTex = roadTex.clone();
+  spurRoadTex.repeat.set(spurSegs / 4, 1);
+
+  const spurVerts = [];
+  const spurUVs = [];
+  const spurIdx = [];
+  for (let i = 0; i <= spurSegs; i++) {
+    const t = i / spurSegs;
+    const pt = spurCurve.getPointAt(t);
+    const tan = spurCurve.getTangentAt(t);
+    const perp = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    const tH = getTerrainHeight(pt.x, pt.z) + 0.2;
+    spurVerts.push(pt.x - perp.x * roadWidth * 0.5, tH, pt.z - perp.z * roadWidth * 0.5);
+    spurVerts.push(pt.x + perp.x * roadWidth * 0.5, tH, pt.z + perp.z * roadWidth * 0.5);
+    const u = t * (spurSegs / 4);
+    spurUVs.push(u, 0);
+    spurUVs.push(u, 1);
+    if (i < spurSegs) {
+      const si = i * 2;
+      spurIdx.push(si, si + 1, si + 2, si + 1, si + 3, si + 2);
+    }
+  }
+  const spurGeo = new THREE.BufferGeometry();
+  spurGeo.setAttribute('position', new THREE.Float32BufferAttribute(spurVerts, 3));
+  spurGeo.setAttribute('uv', new THREE.Float32BufferAttribute(spurUVs, 2));
+  spurGeo.setIndex(spurIdx);
+  spurGeo.computeVertexNormals();
+  const spurMesh = new THREE.Mesh(spurGeo, roadMat.clone());
+  spurMesh.material.map = spurRoadTex;
+  spurMesh.receiveShadow = true;
+  scene.add(spurMesh);
+
+  // Add spur sample points to highway sample points for road-avoidance checks
+  const spurSamples = spurCurve.getPoints(spurSegs);
+  highwaySamplePoints = highwaySamplePoints.concat(spurSamples);
 }
 
 // Export function to get the highway spline path
@@ -1235,6 +1366,7 @@ export function createWildflowers(scene) {
     const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.85;
     if (isNearAirport(x, z)) continue;
     if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
     const h = getTerrainHeight(x, z);
     if (h < 0.5 || h > TERRAIN_MAX_HEIGHT * 0.18) continue;
     flowerPositions.push({ x, z, h });

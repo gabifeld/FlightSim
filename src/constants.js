@@ -106,6 +106,16 @@ export const CITY_CENTER_X = 4000;
 export const CITY_CENTER_Z = -4000;
 export const CITY_SIZE = 2000;
 
+// Cape Town coastal city
+export const CT_CENTER_X = 10000;
+export const CT_CENTER_Z = 0;
+export const CT_SIZE_X = 4400;
+export const CT_SIZE_Z = 4800;
+export const TABLE_MTN_X = 7600;
+export const TABLE_MTN_Z = 0;
+export const SIGNAL_HILL_X = 8400;
+export const SIGNAL_HILL_Z = 1400;
+
 // Coastline / Ocean
 export const COAST_LINE_X = 13000; // x-coordinate where coastline runs
 export const OCEAN_DEPTH = 40; // max depth below sea level
