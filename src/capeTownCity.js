@@ -269,131 +269,184 @@ const CONTAINER_COLORS = [
 ];
 
 // ── Building generation ───────────────────────────────────────────────
+// shape: 'box' | 'setback' | 'cylinder' | 'wedge'
+// setback = tower on wider base (2 stacked boxes rendered separately)
 
 function generateBuildings() {
   const buildings = [];
   _seed = 88888;
 
-  // CBD Core — tall towers
+  // CBD Core — dense towers packed on a block grid
   const cbd = DISTRICTS.cbd;
-  const cbdGridX = 120, cbdGridZ = 120;
-  for (let x = cbd.x0 + 20; x < cbd.x1 - 20; x += cbdGridX) {
-    for (let z = cbd.z0 + 20; z < cbd.z1 - 20; z += cbdGridZ) {
-      if (sr() < 0.06) continue;
-      const cx = x + rr(10, cbdGridX - 30);
-      const cz = z + rr(10, cbdGridZ - 30);
-      const dist = Math.abs(cx - 9800); // distance from center boulevard
-      const h = dist < 200 ? rr(60, 120) : rr(40, 80);
-      const w = rr(18, 35);
-      const d = rr(18, 35);
-      const glass = sr() < 0.4;
-      buildings.push({ x: cx, z: cz, w, d, h, district: 'cbd', glass });
+  const cbdGrid = 28;
+  for (let x = cbd.x0 + 4; x < cbd.x1 - 4; x += cbdGrid) {
+    for (let z = cbd.z0 + 4; z < cbd.z1 - 4; z += cbdGrid) {
+      if (sr() < 0.02) continue;
+      const cx = x + rr(2, cbdGrid - 6);
+      const cz = z + rr(2, cbdGrid - 6);
+      const distFromCenter = Math.sqrt((cx - 9800) ** 2 + cz * cz);
+      const h = distFromCenter < 250 ? rr(70, 120) : (distFromCenter < 450 ? rr(40, 85) : rr(22, 55));
+      const w = rr(14, 26);
+      const d = rr(14, 26);
+      const glass = sr() < 0.45;
 
-      // Podium chance
-      if (h > 50 && sr() < 0.35) {
-        buildings.push({ x: cx, z: cz, w: w * 1.3, d: d * 1.3, h: rr(6, 14), district: 'cbd', glass: false, isPodium: true });
+      // Pick shape — tall towers get varied shapes
+      let shape = 'box';
+      if (h > 50) {
+        const roll = sr();
+        if (roll < 0.25) shape = 'setback';
+        else if (roll < 0.35) shape = 'cylinder';
+        else if (roll < 0.45) shape = 'wedge';
+      }
+
+      const yaw = sr() < 0.3 ? rr(-0.15, 0.15) : 0; // slight rotation variety
+      buildings.push({ x: cx, z: cz, w, d, h, district: 'cbd', glass, shape, yaw });
+
+      // Additional filler buildings in same cell for density
+      if (sr() < 0.35) {
+        const fx = x + rr(2, cbdGrid - 6);
+        const fz = z + rr(2, cbdGrid - 6);
+        const fh = rr(12, h * 0.5);
+        buildings.push({ x: fx, z: fz, w: rr(10, 18), d: rr(10, 18), h: fh, district: 'cbd', glass: sr() < 0.3, shape: 'box', yaw: 0 });
       }
     }
   }
 
-  // Bo-Kaap — small colorful houses on hillside
+  // Bo-Kaap — tight row houses, 7m grid
   const bk = DISTRICTS.bokaap;
-  for (let x = bk.x0 + 5; x < bk.x1 - 5; x += 12) {
-    for (let z = bk.z0 + 5; z < bk.z1 - 5; z += 12) {
-      if (sr() < 0.08) continue;
-      const cx = x + rr(1, 8);
-      const cz = z + rr(1, 8);
-      const h = rr(4, 8);
-      buildings.push({ x: cx, z: cz, w: rr(6, 10), d: rr(6, 10), h, district: 'bokaap' });
+  for (let x = bk.x0 + 1; x < bk.x1 - 1; x += 7) {
+    for (let z = bk.z0 + 1; z < bk.z1 - 1; z += 7) {
+      if (sr() < 0.03) continue;
+      const cx = x + rr(0.5, 4.5);
+      const cz = z + rr(0.5, 4.5);
+      const h = rr(4, 7);
+      buildings.push({ x: cx, z: cz, w: rr(5, 6.5), d: rr(6, 8), h, district: 'bokaap', shape: 'box', yaw: 0 });
     }
   }
 
-  // Waterfront — mid-rise hotels
+  // Waterfront — mid-rise hotels/shops, 30m grid
   const wf = DISTRICTS.waterfront;
-  for (let x = wf.x0 + 20; x < wf.x1 - 20; x += 100) {
-    for (let z = wf.z0 + 20; z < wf.z1 - 20; z += 100) {
-      if (sr() < 0.1) continue;
-      const cx = x + rr(10, 60);
-      const cz = z + rr(10, 60);
-      const h = rr(15, 40);
-      buildings.push({ x: cx, z: cz, w: rr(16, 30), d: rr(16, 30), h, district: 'waterfront' });
+  for (let x = wf.x0 + 6; x < wf.x1 - 6; x += 30) {
+    for (let z = wf.z0 + 6; z < wf.z1 - 6; z += 30) {
+      if (sr() < 0.05) continue;
+      const cx = x + rr(3, 22);
+      const cz = z + rr(3, 22);
+      const h = rr(14, 38);
+      const shape = h > 28 && sr() < 0.2 ? 'setback' : 'box';
+      buildings.push({ x: cx, z: cz, w: rr(14, 26), d: rr(14, 26), h, district: 'waterfront', shape, glass: sr() < 0.2, yaw: 0 });
     }
   }
 
-  // Harbor — warehouses
+  // Harbor — warehouses, 35x45 grid
   const hb = DISTRICTS.harbor;
-  for (let x = hb.x0 + 10; x < hb.x1 - 10; x += 60) {
-    for (let z = hb.z0 + 10; z < hb.z1 - 10; z += 80) {
-      if (sr() < 0.15) continue;
-      const cx = x + rr(5, 30);
-      const cz = z + rr(5, 40);
-      buildings.push({ x: cx, z: cz, w: rr(20, 40), d: rr(25, 50), h: rr(6, 12), district: 'harbor' });
+  for (let x = hb.x0 + 4; x < hb.x1 - 4; x += 35) {
+    for (let z = hb.z0 + 4; z < hb.z1 - 4; z += 45) {
+      if (sr() < 0.06) continue;
+      const cx = x + rr(3, 18);
+      const cz = z + rr(3, 22);
+      buildings.push({ x: cx, z: cz, w: rr(18, 32), d: rr(22, 40), h: rr(6, 12), district: 'harbor', shape: 'box', yaw: 0 });
     }
   }
 
-  // Residential North
-  const rn = DISTRICTS.residentialN;
-  for (let x = rn.x0 + 15; x < rn.x1 - 15; x += 80) {
-    for (let z = rn.z0 + 15; z < rn.z1 - 15; z += 80) {
-      if (sr() < 0.06) continue;
-      const cx = x + rr(10, 50);
-      const cz = z + rr(10, 50);
-      const dist = Math.sqrt((cx - CT_CENTER_X) ** 2 + (cz - CT_CENTER_Z) ** 2);
-      const h = dist < 1000 ? rr(10, 18) : rr(6, 12);
-      buildings.push({ x: cx, z: cz, w: rr(12, 24), d: rr(12, 24), h, district: 'residential' });
+  // Residential areas — 18m grid
+  function fillResidential(dist) {
+    for (let x = dist.x0 + 3; x < dist.x1 - 3; x += 18) {
+      for (let z = dist.z0 + 3; z < dist.z1 - 3; z += 18) {
+        if (sr() < 0.03) continue;
+        const cx = x + rr(1, 13);
+        const cz = z + rr(1, 13);
+        const distFromCBD = Math.sqrt((cx - CT_CENTER_X) ** 2 + (cz - CT_CENTER_Z) ** 2);
+        const h = distFromCBD < 1200 ? rr(8, 20) : rr(4, 12);
+        buildings.push({ x: cx, z: cz, w: rr(9, 16), d: rr(9, 16), h, district: 'residential', shape: 'box', yaw: 0 });
+      }
+    }
+  }
+  fillResidential(DISTRICTS.residentialN);
+  fillResidential(DISTRICTS.residentialS);
+
+  // Transition zones
+  // CBD ↔ Waterfront (X: 10400–10800)
+  for (let x = 10400; x < 10800; x += 24) {
+    for (let z = -800; z < 800; z += 24) {
+      if (sr() < 0.05) continue;
+      buildings.push({ x: x + rr(2, 18), z: z + rr(2, 18), w: rr(12, 20), d: rr(12, 20), h: rr(14, 35), district: 'waterfront', shape: 'box', glass: sr() < 0.2, yaw: 0 });
     }
   }
 
-  // Residential South
-  const rs = DISTRICTS.residentialS;
-  for (let x = rs.x0 + 15; x < rs.x1 - 15; x += 80) {
-    for (let z = rs.z0 + 15; z < rs.z1 - 15; z += 80) {
+  // CBD ↔ Residential (Z: ±800–1200)
+  for (const zRange of [[800, 1200], [-1200, -800]]) {
+    for (let x = 9200; x < 10800; x += 22) {
+      for (let z = zRange[0]; z < zRange[1]; z += 22) {
+        if (sr() < 0.05) continue;
+        buildings.push({ x: x + rr(2, 16), z: z + rr(2, 16), w: rr(10, 18), d: rr(10, 18), h: rr(8, 25), district: 'residential', shape: 'box', yaw: 0 });
+      }
+    }
+  }
+
+  // Western suburbs (X: 8400–9000, Z: -1200 to 200)
+  for (let x = 8400; x < 9000; x += 16) {
+    for (let z = -1200; z < 200; z += 16) {
       if (sr() < 0.06) continue;
-      const cx = x + rr(10, 50);
-      const cz = z + rr(10, 50);
-      const dist = Math.sqrt((cx - CT_CENTER_X) ** 2 + (cz - CT_CENTER_Z) ** 2);
-      const h = dist < 1000 ? rr(10, 18) : rr(6, 12);
-      buildings.push({ x: cx, z: cz, w: rr(12, 24), d: rr(12, 24), h, district: 'residential' });
+      buildings.push({ x: x + rr(1, 12), z: z + rr(1, 12), w: rr(7, 13), d: rr(7, 13), h: rr(4, 10), district: 'residential', shape: 'box', yaw: 0 });
     }
   }
 
   return buildings;
 }
 
-// ── Build buildings with InstancedMesh by type ────────────────────────
+// ── Build buildings with multiple shape archetypes ────────────────────
 
 function buildBuildings(scene, buildings) {
   const dummy = new THREE.Object3D();
   const unitBox = new THREE.BoxGeometry(1, 1, 1);
 
-  // Separate by type
-  const cbdConcrete = buildings.filter(b => b.district === 'cbd' && !b.glass && !b.isPodium);
-  const cbdGlass = buildings.filter(b => b.district === 'cbd' && b.glass);
-  const cbdPodiums = buildings.filter(b => b.district === 'cbd' && b.isPodium);
-  const bokaap = buildings.filter(b => b.district === 'bokaap');
-  const waterfront = buildings.filter(b => b.district === 'waterfront');
-  const harbor = buildings.filter(b => b.district === 'harbor');
-  const residential = buildings.filter(b => b.district === 'residential');
+  // Geometries for different shapes
+  const cylinderGeo = new THREE.CylinderGeometry(0.5, 0.5, 1, 12);
+  // Wedge: a box with one end narrower (approximate with tapered cylinder)
+  const wedgeGeo = new THREE.CylinderGeometry(0.35, 0.5, 1, 4);
 
-  function buildInstancedGroup(list, facadeTex, colors, roughness, metalness) {
-    if (list.length === 0) return;
-    const mat = new THREE.MeshStandardMaterial({ map: facadeTex, roughness, metalness });
-    const mesh = new THREE.InstancedMesh(unitBox, mat, list.length);
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    for (let i = 0; i < list.length; i++) {
-      const b = list[i];
-      const y = b.district === 'bokaap' ? getTerrainHeight(b.x, b.z) + b.h / 2 : b.h / 2;
-      dummy.position.set(b.x, y, b.z);
-      dummy.scale.set(b.w, b.h, b.d);
-      dummy.rotation.set(0, 0, 0);
-      dummy.updateMatrix();
-      mesh.setMatrixAt(i, dummy.matrix);
-      mesh.setColorAt(i, colors[Math.floor(sr() * colors.length)]);
+  // Separate buildings into rendering categories
+  const categories = {
+    cbdConcreteBox: [], cbdGlassBox: [],
+    cbdConcreteCyl: [], cbdGlassCyl: [],
+    cbdConcreteWedge: [], cbdGlassWedge: [],
+    cbdSetbackBase: [], cbdSetbackTower: [],
+    bokaap: [],
+    waterfront: [], waterfrontGlass: [],
+    harbor: [],
+    residential: [],
+  };
+
+  for (const b of buildings) {
+    if (b.district === 'cbd') {
+      if (b.shape === 'setback') {
+        // Base (wider, shorter)
+        const baseH = b.h * rr(0.2, 0.35);
+        categories.cbdSetbackBase.push({ ...b, h: baseH, w: b.w * 1.4, d: b.d * 1.4 });
+        // Tower (narrower, taller)
+        const towerH = b.h - baseH;
+        const cat = b.glass ? 'cbdGlassBox' : 'cbdConcreteBox';
+        categories[cat].push({ ...b, h: towerH, baseY: baseH });
+      } else if (b.shape === 'cylinder') {
+        const cat = b.glass ? 'cbdGlassCyl' : 'cbdConcreteCyl';
+        categories[cat].push(b);
+      } else if (b.shape === 'wedge') {
+        const cat = b.glass ? 'cbdGlassWedge' : 'cbdConcreteWedge';
+        categories[cat].push(b);
+      } else {
+        const cat = b.glass ? 'cbdGlassBox' : 'cbdConcreteBox';
+        categories[cat].push(b);
+      }
+    } else if (b.district === 'bokaap') {
+      categories.bokaap.push(b);
+    } else if (b.district === 'waterfront') {
+      if (b.glass) categories.waterfrontGlass.push(b);
+      else categories.waterfront.push(b);
+    } else if (b.district === 'harbor') {
+      categories.harbor.push(b);
+    } else {
+      categories.residential.push(b);
     }
-    mesh.instanceMatrix.needsUpdate = true;
-    mesh.instanceColor.needsUpdate = true;
-    scene.add(mesh);
   }
 
   const concreteTex = createConcreteFacadeTexture();
@@ -401,44 +454,141 @@ function buildBuildings(scene, buildings) {
   const bokaapTex = createBoKaapFacadeTexture();
   const harborTex = createHarborFacadeTexture();
 
-  // CBD Concrete
-  buildInstancedGroup(cbdConcrete, concreteTex, CBD_CONCRETE_COLORS, 0.85, 0.05);
-
-  // CBD Glass
-  buildInstancedGroup(cbdGlass, glassTex, CBD_GLASS_COLORS, 0.1, 0.7);
-
-  // CBD Podiums
-  if (cbdPodiums.length > 0) {
-    const podMat = new THREE.MeshStandardMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
-    const podMesh = new THREE.InstancedMesh(unitBox, podMat, cbdPodiums.length);
-    podMesh.castShadow = true;
-    podMesh.receiveShadow = true;
-    for (let i = 0; i < cbdPodiums.length; i++) {
-      const b = cbdPodiums[i];
-      dummy.position.set(b.x, b.h / 2, b.z);
+  function placeInstanced(geo, mat, list, colors, getY) {
+    if (list.length === 0) return;
+    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      const y = getY ? getY(b) : (b.baseY || 0) + b.h / 2;
+      dummy.position.set(b.x, y, b.z);
       dummy.scale.set(b.w, b.h, b.d);
-      dummy.rotation.set(0, 0, 0);
+      dummy.rotation.set(0, b.yaw || 0, 0);
       dummy.updateMatrix();
-      podMesh.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(i, dummy.matrix);
+      if (colors) mesh.setColorAt(i, colors[Math.floor(sr() * colors.length)]);
     }
-    podMesh.instanceMatrix.needsUpdate = true;
-    scene.add(podMesh);
+    mesh.instanceMatrix.needsUpdate = true;
+    if (colors && list.length > 0) mesh.instanceColor.needsUpdate = true;
+    scene.add(mesh);
   }
 
-  // Bo-Kaap
-  buildInstancedGroup(bokaap, bokaapTex, BO_KAAP_COLORS, 0.85, 0.02);
+  const concreteMat = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.85, metalness: 0.05 });
+  const glassMat = new THREE.MeshStandardMaterial({ map: glassTex, roughness: 0.1, metalness: 0.7 });
+  const bokaapMat = new THREE.MeshStandardMaterial({ map: bokaapTex, roughness: 0.85, metalness: 0.02 });
+  const harborMat = new THREE.MeshStandardMaterial({ map: harborTex, roughness: 0.9, metalness: 0.1 });
+  const podiumMat = new THREE.MeshStandardMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
+
+  // CBD boxes (concrete & glass)
+  placeInstanced(unitBox, concreteMat, categories.cbdConcreteBox, CBD_CONCRETE_COLORS);
+  placeInstanced(unitBox, glassMat, categories.cbdGlassBox, CBD_GLASS_COLORS);
+
+  // CBD cylinders
+  placeInstanced(cylinderGeo, concreteMat.clone(), categories.cbdConcreteCyl, CBD_CONCRETE_COLORS);
+  placeInstanced(cylinderGeo, glassMat.clone(), categories.cbdGlassCyl, CBD_GLASS_COLORS);
+
+  // CBD wedges
+  placeInstanced(wedgeGeo, concreteMat.clone(), categories.cbdConcreteWedge, CBD_CONCRETE_COLORS);
+  placeInstanced(wedgeGeo, glassMat.clone(), categories.cbdGlassWedge, CBD_GLASS_COLORS);
+
+  // CBD setback bases (wider podiums)
+  placeInstanced(unitBox, podiumMat, categories.cbdSetbackBase, null);
+
+  // Bo-Kaap bodies
+  const bokaapGetY = (b) => getTerrainHeight(b.x, b.z) + b.h / 2;
+  placeInstanced(unitBox, bokaapMat, categories.bokaap, BO_KAAP_COLORS, bokaapGetY);
+
+  // Bo-Kaap pitched roofs (4-sided cone per house)
+  if (categories.bokaap.length > 0) {
+    const roofGeo = new THREE.ConeGeometry(0.72, 1, 4);
+    roofGeo.rotateY(Math.PI * 0.25);
+    const roofMat = new THREE.MeshStandardMaterial({ color: 0x6a4a30, roughness: 0.85 });
+    const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, categories.bokaap.length);
+    roofMesh.castShadow = true;
+    const roofBaseColor = new THREE.Color(0x6a4a30);
+    const roofColor = new THREE.Color();
+    for (let i = 0; i < categories.bokaap.length; i++) {
+      const b = categories.bokaap[i];
+      const terrY = getTerrainHeight(b.x, b.z);
+      dummy.position.set(b.x, terrY + b.h + b.d * 0.15, b.z);
+      dummy.scale.set(b.w * 1.05, b.d * 0.32, b.d * 1.05);
+      dummy.rotation.set(0, b.yaw || 0, 0);
+      dummy.updateMatrix();
+      roofMesh.setMatrixAt(i, dummy.matrix);
+      roofColor.copy(roofBaseColor).multiplyScalar(0.8 + sr() * 0.4);
+      roofMesh.setColorAt(i, roofColor);
+    }
+    roofMesh.instanceMatrix.needsUpdate = true;
+    roofMesh.instanceColor.needsUpdate = true;
+    scene.add(roofMesh);
+  }
 
   // Waterfront
-  buildInstancedGroup(waterfront, concreteTex, WATERFRONT_COLORS, 0.8, 0.05);
+  placeInstanced(unitBox, concreteMat.clone(), categories.waterfront, WATERFRONT_COLORS);
+  placeInstanced(unitBox, glassMat.clone(), categories.waterfrontGlass, CBD_GLASS_COLORS);
 
-  // Harbor warehouses
-  buildInstancedGroup(harbor, harborTex, HARBOR_COLORS, 0.9, 0.1);
+  // Harbor
+  placeInstanced(unitBox, harborMat, categories.harbor, HARBOR_COLORS);
 
   // Residential
-  buildInstancedGroup(residential, concreteTex, RESIDENTIAL_COLORS, 0.85, 0.05);
+  placeInstanced(unitBox, concreteMat.clone(), categories.residential, RESIDENTIAL_COLORS);
+
+  // ── Roof slabs on tall buildings (concrete overhang) ──
+  const tallConcrete = buildings.filter(b => b.h > 18 && !b.glass && b.shape !== 'cylinder' && b.district !== 'bokaap' && b.district !== 'harbor');
+  if (tallConcrete.length > 0) {
+    const slabGeo = new THREE.BoxGeometry(1, 1, 1);
+    const slabMat = new THREE.MeshStandardMaterial({ color: 0x999990, roughness: 0.9 });
+    const slabMesh = new THREE.InstancedMesh(slabGeo, slabMat, tallConcrete.length);
+    slabMesh.castShadow = true;
+    for (let i = 0; i < tallConcrete.length; i++) {
+      const b = tallConcrete[i];
+      const baseY = (b.baseY || 0);
+      dummy.position.set(b.x, baseY + b.h + 0.15, b.z);
+      dummy.scale.set(b.w + 1.0, 0.3, b.d + 1.0);
+      dummy.rotation.set(0, b.yaw || 0, 0);
+      dummy.updateMatrix();
+      slabMesh.setMatrixAt(i, dummy.matrix);
+    }
+    slabMesh.instanceMatrix.needsUpdate = true;
+    scene.add(slabMesh);
+  }
+
+  // ── Ground-level awnings on CBD/waterfront buildings ──
+  const awningCandidates = buildings.filter(b => (b.district === 'cbd' || b.district === 'waterfront') && b.h > 12 && !b.glass && b.shape === 'box');
+  const awningCount = Math.min(awningCandidates.length, 400);
+  if (awningCount > 0) {
+    const awningGeo = new THREE.BoxGeometry(1, 0.15, 1);
+    const awningMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
+    const awningMesh = new THREE.InstancedMesh(awningGeo, awningMat, awningCount);
+    const awningColors = [
+      new THREE.Color(0x884422), new THREE.Color(0x448844),
+      new THREE.Color(0x224488), new THREE.Color(0x886644),
+      new THREE.Color(0x664444), new THREE.Color(0x446666),
+    ];
+    for (let i = 0; i < awningCount; i++) {
+      const b = awningCandidates[i];
+      const side = sr() < 0.5 ? 1 : -1;
+      const onX = sr() < 0.5;
+      if (onX) {
+        dummy.position.set(b.x + side * (b.w / 2 + 1.2), 3.5, b.z);
+        dummy.scale.set(2.5, 1, b.d * 0.6);
+      } else {
+        dummy.position.set(b.x, 3.5, b.z + side * (b.d / 2 + 1.2));
+        dummy.scale.set(b.w * 0.6, 1, 2.5);
+      }
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      awningMesh.setMatrixAt(i, dummy.matrix);
+      awningMesh.setColorAt(i, awningColors[Math.floor(sr() * awningColors.length)]);
+    }
+    awningMesh.instanceMatrix.needsUpdate = true;
+    awningMesh.instanceColor.needsUpdate = true;
+    scene.add(awningMesh);
+  }
 
   // ── Building window glow (night-mode) ──
-  const allBuildings = buildings.filter(b => !b.isPodium);
+  const allBuildings = buildings.filter(b => b.shape !== 'setback' || !b.isPodium);
   let totalWindows = 0;
   for (const b of allBuildings) {
     const floors = Math.floor(b.h / 4);
@@ -449,12 +599,8 @@ function buildBuildings(scene, buildings) {
 
   const winGeo = new THREE.PlaneGeometry(1.5, 1.0);
   const winMat = new THREE.MeshStandardMaterial({
-    color: 0x000000,
-    emissive: 0xFFDD88,
-    emissiveIntensity: 0.8,
-    transparent: true,
-    opacity: 0.6,
-    side: THREE.DoubleSide,
+    color: 0x000000, emissive: 0xFFDD88, emissiveIntensity: 0.8,
+    transparent: true, opacity: 0.6, side: THREE.DoubleSide,
   });
   const winMesh = new THREE.InstancedMesh(winGeo, winMat, totalWindows);
   let winIdx = 0;
@@ -464,7 +610,7 @@ function buildBuildings(scene, buildings) {
     const floors = Math.floor(b.h / 4);
     if (floors < 1) continue;
     const panels = Math.min(6, Math.max(2, Math.floor(floors * 0.7)));
-    const baseY = b.district === 'bokaap' ? getTerrainHeight(b.x, b.z) : 0;
+    const baseY = b.district === 'bokaap' ? getTerrainHeight(b.x, b.z) : (b.baseY || 0);
 
     for (let p = 0; p < panels; p++) {
       if (winIdx >= totalWindows) break;
@@ -502,12 +648,17 @@ function buildRooftopDetails(scene, buildings) {
 
   _seed = 99999;
   for (const b of buildings) {
-    if (b.isPodium) continue;
-    if (sr() < 0.3) {
-      roofAC.push({ x: b.x + rr(-b.w / 4, b.w / 4), z: b.z + rr(-b.d / 4, b.d / 4), h: b.h, district: b.district });
+    if (b.district === 'bokaap') continue; // Bo-Kaap has pitched roofs
+    if (b.h < 8) continue;
+    if (sr() < 0.35) {
+      roofAC.push({ x: b.x + rr(-b.w / 4, b.w / 4), z: b.z + rr(-b.d / 4, b.d / 4), h: b.h + (b.baseY || 0), district: b.district });
     }
-    if (b.h > 35 && sr() < 0.5) {
-      roofAntennas.push({ x: b.x, z: b.z, h: b.h, district: b.district });
+    // Second AC unit for tall buildings
+    if (b.h > 30 && sr() < 0.4) {
+      roofAC.push({ x: b.x + rr(-b.w / 4, b.w / 4), z: b.z + rr(-b.d / 4, b.d / 4), h: b.h + (b.baseY || 0), district: b.district });
+    }
+    if (b.h > 30 && sr() < 0.5) {
+      roofAntennas.push({ x: b.x, z: b.z, h: b.h + (b.baseY || 0), district: b.district });
     }
   }
 
@@ -518,9 +669,8 @@ function buildRooftopDetails(scene, buildings) {
     acMesh.castShadow = true;
     for (let i = 0; i < roofAC.length; i++) {
       const a = roofAC[i];
-      const baseY = a.district === 'bokaap' ? getTerrainHeight(a.x, a.z) : 0;
       const s = 1.2 + sr() * 1.5;
-      dummy.position.set(a.x, baseY + a.h + 0.5, a.z);
+      dummy.position.set(a.x, a.h + 0.5, a.z);
       dummy.scale.set(s, 1.0, s * 0.8);
       dummy.rotation.set(0, sr() * Math.PI, 0);
       dummy.updateMatrix();
@@ -536,8 +686,7 @@ function buildRooftopDetails(scene, buildings) {
     const antMesh = new THREE.InstancedMesh(antGeo, antMat, roofAntennas.length);
     for (let i = 0; i < roofAntennas.length; i++) {
       const a = roofAntennas[i];
-      const baseY = a.district === 'bokaap' ? getTerrainHeight(a.x, a.z) : 0;
-      dummy.position.set(a.x, baseY + a.h + 4, a.z);
+      dummy.position.set(a.x, a.h + 4, a.z);
       dummy.scale.set(1, 1, 1);
       dummy.rotation.set(0, 0, 0);
       dummy.updateMatrix();
@@ -548,7 +697,7 @@ function buildRooftopDetails(scene, buildings) {
   }
 
   // Obstruction lights on tall buildings
-  const tallBuildings = buildings.filter(b => b.h > 30 && !b.isPodium);
+  const tallBuildings = buildings.filter(b => b.h > 30);
   if (tallBuildings.length > 0) {
     const obGeo = new THREE.SphereGeometry(0.3, 6, 5);
     const obMat = new THREE.MeshStandardMaterial({
@@ -557,7 +706,7 @@ function buildRooftopDetails(scene, buildings) {
     const obMesh = new THREE.InstancedMesh(obGeo, obMat, tallBuildings.length);
     for (let i = 0; i < tallBuildings.length; i++) {
       const b = tallBuildings[i];
-      dummy.position.set(b.x, b.h + 0.5, b.z);
+      dummy.position.set(b.x, (b.baseY || 0) + b.h + 0.5, b.z);
       dummy.scale.set(1, 1, 1);
       dummy.rotation.set(0, 0, 0);
       dummy.updateMatrix();
