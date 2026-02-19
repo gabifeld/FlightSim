@@ -11,21 +11,21 @@ function createRunwayTexture() {
   const w = canvas.width;
   const h = canvas.height;
 
-  // Asphalt base with subtle noise
-  ctx.fillStyle = '#2a2a2a';
+  // Darker asphalt base for high contrast
+  ctx.fillStyle = 'rgb(50, 50, 55)';
   ctx.fillRect(0, 0, w, h);
 
   for (let i = 0; i < 40000; i++) {
     const x = Math.random() * w;
     const y = Math.random() * h;
-    const brightness = 25 + Math.random() * 20;
-    ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${brightness})`;
+    const brightness = 40 + Math.random() * 25;
+    ctx.fillStyle = `rgb(${brightness}, ${brightness}, ${brightness + 2})`;
     ctx.fillRect(x, y, 1, 1);
   }
 
-  // Edge lines
-  ctx.strokeStyle = '#dddddd';
-  ctx.lineWidth = 16;
+  // Edge lines (50% wider)
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 24;
   ctx.beginPath();
   ctx.moveTo(24, 0);
   ctx.lineTo(24, h);
@@ -33,9 +33,9 @@ function createRunwayTexture() {
   ctx.lineTo(w - 24, h);
   ctx.stroke();
 
-  // Center dashed line
-  ctx.strokeStyle = '#dddddd';
-  ctx.lineWidth = 8;
+  // Center dashed line (50% wider)
+  ctx.strokeStyle = '#ffffff';
+  ctx.lineWidth = 12;
   ctx.setLineDash([80, 60]);
   ctx.beginPath();
   ctx.moveTo(w / 2, 0);
@@ -43,11 +43,11 @@ function createRunwayTexture() {
   ctx.stroke();
   ctx.setLineDash([]);
 
-  // Threshold markings
-  ctx.fillStyle = '#dddddd';
+  // Threshold markings (wider stripes, pure white)
+  ctx.fillStyle = '#ffffff';
   const thresholdStripes = 12;
-  const stripeW = 40;
-  const stripeH = 180;
+  const stripeW = 60;
+  const stripeH = 220;
   const stripeGap = (w - 80) / thresholdStripes;
   for (let end = 0; end < 2; end++) {
     const yBase = end === 0 ? 60 : h - stripeH - 60;
@@ -57,25 +57,26 @@ function createRunwayTexture() {
     }
   }
 
-  // Touchdown zone markings
+  // Touchdown zone markings (wider)
+  ctx.fillStyle = '#ffffff';
   for (let end = 0; end < 2; end++) {
     for (let pair = 0; pair < 3; pair++) {
       const offset = end === 0 ? 350 + pair * 200 : h - 350 - pair * 200 - 80;
-      ctx.fillRect(w * 0.3, offset, 60, 80);
-      ctx.fillRect(w * 0.7 - 60, offset, 60, 80);
+      ctx.fillRect(w * 0.3, offset, 90, 80);
+      ctx.fillRect(w * 0.7 - 90, offset, 90, 80);
     }
   }
 
-  // Aiming point markings
+  // Aiming point markings (wider)
   for (let end = 0; end < 2; end++) {
-    const y = end === 0 ? 1000 : h - 1000 - 100;
-    ctx.fillRect(w * 0.25, y, 100, 100);
-    ctx.fillRect(w * 0.75 - 100, y, 100, 100);
+    const y = end === 0 ? 1000 : h - 1000 - 120;
+    ctx.fillRect(w * 0.25, y, 120, 120);
+    ctx.fillRect(w * 0.75 - 120, y, 120, 120);
   }
 
-  // Runway numbers
-  ctx.fillStyle = '#dddddd';
-  ctx.font = 'bold 120px sans-serif';
+  // Runway numbers (larger, pure white)
+  ctx.fillStyle = '#ffffff';
+  ctx.font = 'bold 160px sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
 
