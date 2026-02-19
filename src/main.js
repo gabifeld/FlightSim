@@ -14,14 +14,14 @@ import {
   FlightState,
 } from './gameState.js';
 import { initPostProcessing, updatePostProcessing, renderFrame, onResize } from './postprocessing.js';
-import { initAudio, updateAudio, setRainVolume } from './audio.js';
+import { initAudio, updateAudio, setRainVolume, playCreakSound, canPlayCreak } from './audio.js';
 import { initWeather, updateWeather, getWeatherState } from './weather.js';
 import { initTaxiGuidance, registerIntlTaxiChecks } from './taxi.js';
 import { isLandingMode } from './landing.js';
 import { MAX_DT } from './constants.js';
 
 // New modules
-import { initSettings, getSetting, isSettingExplicit } from './settings.js';
+import { initSettings, getSetting, setSetting, isSettingExplicit } from './settings.js';
 import { initGPWS, updateGPWS, resetGPWS } from './gpws.js';
 import { initParticles, updateParticles } from './particles.js';
 import { initWeatherFx, updateWeatherFx, setAmbientRef, getCurrentPreset, WEATHER_PRESETS } from './weatherFx.js';
@@ -35,7 +35,7 @@ import { createCity, updateCityNight } from './city.js';
 import { createCapeTownCity, updateCapeTownNight } from './capeTownCity.js';
 import { createCoastal } from './coastal.js';
 import { updateChallenge, resetChallenge, setSpeedrunCallback, formatTime } from './challenges.js';
-import { applyGraphicsQuality } from './graphics.js';
+import { applyGraphicsQuality, runBenchmark } from './graphics.js';
 import { initPerfProbe, updatePerfProbe } from './debugPerf.js';
 import { initGroundVehicleAI, updateGroundVehicleAI } from './groundVehicleAI.js';
 import { updateCarPhysics } from './carPhysics.js';
@@ -67,8 +67,13 @@ scene.add(camera); // camera must be in scene for speed lines child to render
 initHUD();
 initWeather();
 
-// Graphics quality settings
-const graphicsPreset = applyGraphicsQuality(getSetting('graphicsQuality'));
+// Auto-detect graphics quality if user never explicitly set it
+let detectedQuality = getSetting('graphicsQuality');
+if (!isSettingExplicit('graphicsQuality')) {
+  detectedQuality = runBenchmark(renderer, scene, camera);
+  setSetting('graphicsQuality', detectedQuality);
+}
+const graphicsPreset = applyGraphicsQuality(detectedQuality);
 setCloudQuality(isSettingExplicit('cloudQuality') ? getSetting('cloudQuality') : graphicsPreset.cloudQuality);
 configureShadowQuality(isSettingExplicit('shadowQuality') ? getSetting('shadowQuality') : graphicsPreset.shadowQuality);
 
@@ -289,7 +294,13 @@ function gameLoop(time) {
 
     // Audio
     if (audioInitialized) {
-      updateAudio(getActiveVehicle(), dt);
+      updateAudio(getActiveVehicle(), dt, getCameraMode());
+
+      // Structural creak at high G
+      const av = getActiveVehicle();
+      if (isAircraft(av) && Math.abs(av.gForce) > 3.0 && canPlayCreak()) {
+        playCreakSound();
+      }
 
       // Rain volume from weather preset
       const presetName = getCurrentPreset();
@@ -315,7 +326,7 @@ function gameLoop(time) {
   const weather = getWeatherState();
 
   // Water wave animation (always for menu background)
-  updateWater(dt, weather.windVector);
+  updateWater(dt, weather.windVector, camera);
 
   // Cloud drift with wind + time-of-day coloring
   const activeVehicle = getActiveVehicle();

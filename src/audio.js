@@ -13,6 +13,19 @@ let rainGain;
 let thunderBuffer = null;
 let initialized = false;
 
+// Wind rush (separate from wind — higher intensity, airspeed-driven)
+let windRushSource;
+let windRushGain;
+let windRushFilter;
+
+// Cockpit ambiance
+let cockpitHumOsc;
+let cockpitNoiseSource;
+let cockpitGain;
+
+// Creak throttle
+let lastCreakTime = 0;
+
 function createNoiseBuffer(duration) {
   const sampleRate = ctx.sampleRate;
   const length = sampleRate * duration;
@@ -112,9 +125,56 @@ export function initAudio() {
 
   // Pre-allocate thunder noise buffer
   thunderBuffer = createNoiseBuffer(2);
+
+  // Wind rush: bandpass-filtered noise, scales with airspeed
+  windRushGain = ctx.createGain();
+  windRushGain.gain.value = 0;
+  windRushFilter = ctx.createBiquadFilter();
+  windRushFilter.type = 'bandpass';
+  windRushFilter.frequency.value = 200;
+  windRushFilter.Q.value = 0.8;
+
+  const windRushBuf = createNoiseBuffer(2);
+  windRushSource = ctx.createBufferSource();
+  windRushSource.buffer = windRushBuf;
+  windRushSource.loop = true;
+  windRushSource.connect(windRushFilter);
+  windRushFilter.connect(windRushGain);
+  windRushGain.connect(masterGain);
+  windRushSource.start();
+
+  // Cockpit ambiance: 60Hz hum + filtered noise at very low volume
+  cockpitGain = ctx.createGain();
+  cockpitGain.gain.value = 0;
+
+  cockpitHumOsc = ctx.createOscillator();
+  cockpitHumOsc.type = 'sine';
+  cockpitHumOsc.frequency.value = 60;
+  const humGain = ctx.createGain();
+  humGain.gain.value = 0.5;
+  cockpitHumOsc.connect(humGain);
+  humGain.connect(cockpitGain);
+  cockpitHumOsc.start();
+
+  const cockpitNoiseBuf = createNoiseBuffer(2);
+  cockpitNoiseSource = ctx.createBufferSource();
+  cockpitNoiseSource.buffer = cockpitNoiseBuf;
+  cockpitNoiseSource.loop = true;
+  const cockpitNoiseFilter = ctx.createBiquadFilter();
+  cockpitNoiseFilter.type = 'lowpass';
+  cockpitNoiseFilter.frequency.value = 400;
+  cockpitNoiseFilter.Q.value = 0.5;
+  const cockpitNoiseGain = ctx.createGain();
+  cockpitNoiseGain.gain.value = 0.3;
+  cockpitNoiseSource.connect(cockpitNoiseFilter);
+  cockpitNoiseFilter.connect(cockpitNoiseGain);
+  cockpitNoiseGain.connect(cockpitGain);
+  cockpitNoiseSource.start();
+
+  cockpitGain.connect(masterGain);
 }
 
-export function updateAudio(state, dt) {
+export function updateAudio(state, dt, cameraMode) {
   if (!ctx || ctx.state === 'suspended') return;
 
   const now = ctx.currentTime;
@@ -135,6 +195,19 @@ export function updateAudio(state, dt) {
   const windVol = Math.min(speed / 120, 1.0) * 0.15;
   windGain.gain.setTargetAtTime(windVol, now, 0.2);
   windFilter.frequency.setTargetAtTime(600 + speed * 12, now, 0.2);
+
+  // Wind rush: louder bandpass noise that scales with high airspeed
+  if (windRushGain) {
+    const speedFactor = Math.min(speed / 250, 1.0);
+    windRushFilter.frequency.setTargetAtTime(200 + speedFactor * 2000, now, 0.1);
+    windRushGain.gain.setTargetAtTime(speedFactor * 0.12, now, 0.15);
+  }
+
+  // Cockpit ambiance: audible only in cockpit camera mode
+  if (cockpitGain) {
+    const targetVol = cameraMode === 'cockpit' ? 0.03 : 0;
+    cockpitGain.gain.setTargetAtTime(targetVol, now, 0.3);
+  }
 
   // Stall warning (uses per-aircraft stallAoa)
   const stallAoa = (state.config && state.config.stallAoa) || 0.38; // fallback ~22deg
@@ -197,15 +270,70 @@ function playNoiseBurst(duration, filterFreq, filterType, volume) {
 }
 
 export function playGearSound() {
-  playNoiseBurst(0.5, 300, 'bandpass', 0.3);
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // Low thunk (60Hz sine burst, 0.1s)
+  const thunkOsc = ctx.createOscillator();
+  thunkOsc.type = 'sine';
+  thunkOsc.frequency.value = 60;
+  const thunkGain = ctx.createGain();
+  thunkGain.gain.setValueAtTime(0.3, now);
+  thunkGain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+  thunkOsc.connect(thunkGain);
+  thunkGain.connect(masterGain);
+  thunkOsc.start(now);
+  thunkOsc.stop(now + 0.15);
+
+  // Mechanical clunk (noise burst, 0.05s)
+  playNoiseBurst(0.05, 500, 'bandpass', 0.25);
+
+  // Original longer noise
+  playNoiseBurst(0.5, 300, 'bandpass', 0.2);
 }
 
 export function playFlapSound() {
-  playNoiseBurst(0.3, 800, 'bandpass', 0.25);
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // Servo whine: rising sine 400 -> 800Hz, 0.3s
+  const servoOsc = ctx.createOscillator();
+  servoOsc.type = 'sine';
+  servoOsc.frequency.setValueAtTime(400, now);
+  servoOsc.frequency.linearRampToValueAtTime(800, now + 0.3);
+  const servoGain = ctx.createGain();
+  servoGain.gain.setValueAtTime(0.12, now);
+  servoGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+  servoOsc.connect(servoGain);
+  servoGain.connect(masterGain);
+  servoOsc.start(now);
+  servoOsc.stop(now + 0.4);
+
+  // Original noise
+  playNoiseBurst(0.3, 800, 'bandpass', 0.15);
 }
 
 export function playTouchdownSound(intensity) {
+  if (!ctx) return;
+  const now = ctx.currentTime;
   const vol = Math.min(intensity * 0.3, 0.5);
+
+  // Tire chirp: highpass noise at 2000Hz, 0.15s
+  const chirpSource = ctx.createBufferSource();
+  chirpSource.buffer = createNoiseBuffer(0.2);
+  const chirpFilter = ctx.createBiquadFilter();
+  chirpFilter.type = 'highpass';
+  chirpFilter.frequency.value = 2000;
+  const chirpGain = ctx.createGain();
+  chirpGain.gain.setValueAtTime(vol * 0.7, now);
+  chirpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+  chirpSource.connect(chirpFilter);
+  chirpFilter.connect(chirpGain);
+  chirpGain.connect(masterGain);
+  chirpSource.start(now);
+  chirpSource.stop(now + 0.2);
+
+  // Original thump
   playNoiseBurst(0.2, 400, 'lowpass', vol);
 }
 
@@ -267,6 +395,39 @@ export function playCrashSound() {
   impactGain.connect(masterGain);
   impactSource.start(now);
   impactSource.stop(now + 1);
+}
+
+export function playCreakSound() {
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // Structural creak: sawtooth 80-120Hz -> bandpass 200Hz Q=5, 0.5s decay
+  const osc = ctx.createOscillator();
+  osc.type = 'sawtooth';
+  osc.frequency.value = 80 + Math.random() * 40;
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 200;
+  filter.Q.value = 5;
+
+  const gain = ctx.createGain();
+  gain.gain.setValueAtTime(0.05, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+  osc.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  osc.start(now);
+  osc.stop(now + 0.55);
+}
+
+export function canPlayCreak() {
+  if (!ctx) return false;
+  const now = ctx.currentTime;
+  if (now - lastCreakTime < 2) return false;
+  lastCreakTime = now;
+  return true;
 }
 
 export function playAPDisconnect() {
