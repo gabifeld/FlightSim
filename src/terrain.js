@@ -630,7 +630,7 @@ const _treeImpostorColor = new THREE.Color(0x4b6542);
 const _bushColor = new THREE.Color(0x425b38);
 const _deadImpostorColor = new THREE.Color(0x675f50);
 
-function createVegetationMesh(geometry, material, count, castShadow = true) {
+function createVegetationMesh(geometry, material, count, castShadow = false) {
   const mesh = new THREE.InstancedMesh(geometry, material, Math.max(1, count));
   mesh.userData.maxCount = Math.max(1, count);
   mesh.count = 0;
@@ -884,11 +884,6 @@ export function createVegetation(scene) {
   const deciduousInstanced = createVegetationMesh(sphereGeo, deciduousMat, vegetationProfile.nearTreeCap);
   const bushInstanced = createVegetationMesh(bushGeo, bushMat, vegetationProfile.nearBushCap);
   const deadInstanced = createVegetationMesh(deadTrunkGeo, deadTrunkMat, vegetationProfile.nearDeadCap);
-  trunkInstanced.castShadow = true;
-  coniferInstanced.castShadow = true;
-  deciduousInstanced.castShadow = true;
-  bushInstanced.castShadow = true;
-  deadInstanced.castShadow = true;
 
   scene.add(trunkInstanced);
   scene.add(coniferInstanced);
@@ -972,7 +967,6 @@ export function createRuralStructures(scene) {
   const farmGeo = new THREE.BoxGeometry(8, 5, 10);
   const farmMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   const farmInstanced = new THREE.InstancedMesh(farmGeo, farmMat, farmPositions.length);
-  farmInstanced.castShadow = true;
   farmInstanced.receiveShadow = true;
   for (let i = 0; i < farmPositions.length; i++) {
     const p = farmPositions[i];
@@ -993,7 +987,6 @@ export function createRuralStructures(scene) {
   const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, farmPositions.length);
   const roofBaseColor = new THREE.Color(0x7b4f30);
   const roofColor = new THREE.Color();
-  roofMesh.castShadow = true;
   roofMesh.receiveShadow = true;
   for (let i = 0; i < farmPositions.length; i++) {
     const p = farmPositions[i];
@@ -1030,7 +1023,6 @@ export function createRuralStructures(scene) {
   const barnGeo = new THREE.BoxGeometry(12, 6, 15);
   const barnMat = new THREE.MeshLambertMaterial({ color: 0x8b4513 });
   const barnInstanced = new THREE.InstancedMesh(barnGeo, barnMat, barnPositions.length);
-  barnInstanced.castShadow = true;
   barnInstanced.receiveShadow = true;
   const barnColor = new THREE.Color(0x8b4513);
   const barnTint = new THREE.Color();
@@ -1053,7 +1045,6 @@ export function createRuralStructures(scene) {
   const barnRoofMat = new THREE.MeshLambertMaterial({ color: 0x5f3020 });
   const barnRoofMesh = new THREE.InstancedMesh(barnRoofGeo, barnRoofMat, barnPositions.length);
   const barnRoofBase = new THREE.Color(0x5f3020);
-  barnRoofMesh.castShadow = true;
   barnRoofMesh.receiveShadow = true;
   for (let i = 0; i < barnPositions.length; i++) {
     const p = barnPositions[i];
@@ -1087,13 +1078,11 @@ export function createRuralStructures(scene) {
     const siloBodyGeo = new THREE.CylinderGeometry(1.4, 1.6, 9, 10);
     const siloBodyMat = new THREE.MeshLambertMaterial({ color: 0xb5b8bd });
     const siloBodyMesh = new THREE.InstancedMesh(siloBodyGeo, siloBodyMat, siloPositions.length);
-    siloBodyMesh.castShadow = true;
     siloBodyMesh.receiveShadow = true;
 
     const siloCapGeo = new THREE.SphereGeometry(1.55, 10, 8, 0, Math.PI * 2, 0, Math.PI * 0.5);
     const siloCapMat = new THREE.MeshLambertMaterial({ color: 0x8f949a });
     const siloCapMesh = new THREE.InstancedMesh(siloCapGeo, siloCapMat, siloPositions.length);
-    siloCapMesh.castShadow = true;
     const siloBaseColor = new THREE.Color(0xb5b8bd);
     const siloCapBaseColor = new THREE.Color(0x8f949a);
 
@@ -1335,7 +1324,6 @@ export function createRockFormations(scene) {
   });
 
   const rockInstanced = new THREE.InstancedMesh(rockGeo, rockMat, rockPositions.length);
-  rockInstanced.castShadow = true;
   rockInstanced.receiveShadow = true;
 
   const rockColor = new THREE.Color(0x7a7a72);

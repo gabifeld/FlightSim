@@ -312,7 +312,7 @@ function createTerminal1(group) {
   // Main building
   const body = new THREE.Mesh(new THREE.BoxGeometry(200, 14, 40), _concreteMat);
   body.position.set(tx, 7, tz);
-  body.castShadow = true; body.receiveShadow = true;
+  body.receiveShadow = true;
   group.add(body);
 
   // Upper floor
@@ -321,7 +321,6 @@ function createTerminal1(group) {
     new THREE.MeshStandardMaterial({ color: 0x8a8580, roughness: 0.6 })
   );
   upper.position.set(tx, 17, tz);
-  upper.castShadow = true;
   group.add(upper);
 
   // Glass facade (airside, facing north toward runway)
@@ -339,7 +338,6 @@ function createTerminal1(group) {
   // Roof
   const roof = new THREE.Mesh(new THREE.BoxGeometry(210, 0.8, 45), _darkMetalMat);
   roof.position.set(tx, 20.4, tz);
-  roof.castShadow = true;
   group.add(roof);
 
   // 6 jet bridges (extending north toward runway)
@@ -378,7 +376,7 @@ function createTerminal2(group) {
   // Larger footprint
   const body = new THREE.Mesh(new THREE.BoxGeometry(280, 16, 50), _concreteMat);
   body.position.set(tx, 8, tz);
-  body.castShadow = true; body.receiveShadow = true;
+  body.\1 = true;
   group.add(body);
 
   // Upper section
@@ -387,7 +385,6 @@ function createTerminal2(group) {
     new THREE.MeshStandardMaterial({ color: 0x8a8580, roughness: 0.6 })
   );
   upper.position.set(tx, 19.5, tz);
-  upper.castShadow = true;
   group.add(upper);
 
   // Glass facade (south, toward runway)
@@ -408,7 +405,6 @@ function createTerminal2(group) {
   roofCurve.rotation.z = Math.PI / 2;
   roofCurve.rotation.y = Math.PI / 2;
   roofCurve.position.set(tx, 23, tz);
-  roofCurve.castShadow = true;
   group.add(roofCurve);
 
   // 8 jet bridges (extending south)
@@ -461,7 +457,7 @@ function createCargoTerminal(group) {
     // Warehouse
     const warehouse = new THREE.Mesh(new THREE.BoxGeometry(80, 12, 35), corrugatedMat);
     warehouse.position.set(cx + 60, 6, bz);
-    warehouse.castShadow = true; warehouse.receiveShadow = true;
+    warehouse.\1 = true;
     group.add(warehouse);
 
     // Curved roof
@@ -472,7 +468,6 @@ function createCargoTerminal(group) {
     roofC.rotation.z = Math.PI / 2;
     roofC.rotation.y = Math.PI / 2;
     roofC.position.set(cx + 60, 12, bz);
-    roofC.castShadow = true;
     group.add(roofC);
 
     // Loading dock doors (west side, facing apron)
@@ -533,7 +528,6 @@ function createIntlControlTower(group) {
   // Base
   const base = new THREE.Mesh(new THREE.BoxGeometry(14, 10, 14), _concreteMat);
   base.position.set(tx, 5, tz);
-  base.castShadow = true;
   group.add(base);
 
   // Shaft
@@ -542,7 +536,6 @@ function createIntlControlTower(group) {
     new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 0.5 })
   );
   shaft.position.set(tx, 27.5, tz);
-  shaft.castShadow = true;
   group.add(shaft);
 
   // Deck
@@ -551,7 +544,6 @@ function createIntlControlTower(group) {
     _darkMetalMat
   );
   deck.position.set(tx, 46, tz);
-  deck.castShadow = true;
   group.add(deck);
 
   // Glass cab
@@ -561,7 +553,6 @@ function createIntlControlTower(group) {
   });
   const cab = new THREE.Mesh(new THREE.CylinderGeometry(9, 9, 6, 14), cabMat);
   cab.position.set(tx, 50, tz);
-  cab.castShadow = true;
   group.add(cab);
 
   // Cap
@@ -570,7 +561,6 @@ function createIntlControlTower(group) {
     new THREE.MeshStandardMaterial({ color: 0x444444 })
   );
   cap.position.set(tx, 54, tz);
-  cap.castShadow = true;
   group.add(cap);
 
   // Antenna
@@ -653,7 +643,7 @@ function createWestFacilities(group) {
     const hz = wz + 40 + i * 80;
     const hangar = new THREE.Mesh(new THREE.BoxGeometry(60, 14, 50), hangarMat);
     hangar.position.set(wx, 7, hz);
-    hangar.castShadow = true; hangar.receiveShadow = true;
+    hangar.\1 = true;
     group.add(hangar);
 
     const roofC = new THREE.Mesh(
@@ -663,7 +653,6 @@ function createWestFacilities(group) {
     roofC.rotation.z = Math.PI / 2;
     roofC.rotation.y = Math.PI / 2;
     roofC.position.set(wx, 14, hz);
-    roofC.castShadow = true;
     group.add(roofC);
 
     // Doors
@@ -681,7 +670,7 @@ function createWestFacilities(group) {
 
   const fireBldg = new THREE.Mesh(new THREE.BoxGeometry(30, 8, 20), brickMat);
   fireBldg.position.set(fireX, 4, fireZ);
-  fireBldg.castShadow = true; fireBldg.receiveShadow = true;
+  fireBldg.\1 = true;
   group.add(fireBldg);
 
   const fireRoof = new THREE.Mesh(new THREE.BoxGeometry(32, 0.5, 22), _darkMetalMat);
@@ -1350,7 +1339,7 @@ function createAirportHotel(group) {
   const hotelMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.4, metalness: 0.2 });
   const tower = new THREE.Mesh(new THREE.BoxGeometry(30, 50, 25), hotelMat);
   tower.position.set(hx, 25, hz);
-  tower.castShadow = true; tower.receiveShadow = true;
+  tower.\1 = true;
   group.add(tower);
 
   // Glass facade on all sides
@@ -1373,7 +1362,6 @@ function createAirportHotel(group) {
   const confMat = new THREE.MeshStandardMaterial({ color: 0x99aabb, roughness: 0.5 });
   const conf = new THREE.Mesh(new THREE.BoxGeometry(60, 12, 30), confMat);
   conf.position.set(hx - 45, 6, hz);
-  conf.castShadow = true;
   group.add(conf);
 
   // Conference roof
@@ -1391,7 +1379,6 @@ function createRadarFacility(group) {
   // Equipment building
   const bldg = new THREE.Mesh(new THREE.BoxGeometry(12, 5, 8), _concreteMat);
   bldg.position.set(rx, 2.5, rz);
-  bldg.castShadow = true;
   group.add(bldg);
 
   // Radar dish tower

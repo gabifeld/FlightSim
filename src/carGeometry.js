@@ -9,7 +9,6 @@ const _wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0
 function createWheel() {
   const wheel = new THREE.Mesh(_wheelGeo, _wheelMat);
   wheel.rotation.z = Math.PI / 2;
-  wheel.castShadow = true;
   return wheel;
 }
 
@@ -22,7 +21,6 @@ export function buildCarModel(typeName) {
   const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.4, metalness: 0.3 });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.position.y = cfg.height * 0.35;
-  body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
@@ -35,7 +33,6 @@ export function buildCarModel(typeName) {
   const cabin = new THREE.Mesh(cabinGeo, cabinMat);
   cabin.position.y = cfg.height * 0.35 + cfg.height * 0.25 + cabinH * 0.5;
   cabin.position.z = -cfg.length * 0.05;
-  cabin.castShadow = true;
   group.add(cabin);
 
   // Wheels
@@ -87,7 +84,6 @@ export function buildGroundVehicleModel(typeName) {
   const bodyMat = new THREE.MeshStandardMaterial({ color: cfg.color, roughness: 0.6, metalness: 0.2 });
   const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.position.y = cfg.height * 0.35;
-  body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
@@ -97,7 +93,6 @@ export function buildGroundVehicleModel(typeName) {
   const cab = new THREE.Mesh(cabGeo, cabMat);
   cab.position.y = cfg.height * 0.65;
   cab.position.z = -cfg.length * 0.3;
-  cab.castShadow = true;
   group.add(cab);
 
   // Wheels (4 wheels)

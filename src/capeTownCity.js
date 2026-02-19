@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {
   CT_CENTER_X, CT_CENTER_Z, CT_SIZE_X, CT_SIZE_Z,
 } from './constants.js';
-import { getTerrainHeight } from './terrain.js';
+import { getTerrainHeightCached as getTerrainHeight } from './terrain.js';
 
 // ── Module state ──────────────────────────────────────────────────────
 let streetBulbMesh = null;
@@ -457,7 +457,6 @@ function buildBuildings(scene, buildings) {
   function placeInstanced(geo, mat, list, colors, getY) {
     if (list.length === 0) return;
     const mesh = new THREE.InstancedMesh(geo, mat, list.length);
-    mesh.castShadow = true;
     mesh.receiveShadow = true;
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
@@ -505,7 +504,6 @@ function buildBuildings(scene, buildings) {
     roofGeo.rotateY(Math.PI * 0.25);
     const roofMat = new THREE.MeshStandardMaterial({ color: 0x6a4a30, roughness: 0.85 });
     const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, categories.bokaap.length);
-    roofMesh.castShadow = true;
     const roofBaseColor = new THREE.Color(0x6a4a30);
     const roofColor = new THREE.Color();
     for (let i = 0; i < categories.bokaap.length; i++) {
@@ -540,7 +538,6 @@ function buildBuildings(scene, buildings) {
     const slabGeo = new THREE.BoxGeometry(1, 1, 1);
     const slabMat = new THREE.MeshStandardMaterial({ color: 0x999990, roughness: 0.9 });
     const slabMesh = new THREE.InstancedMesh(slabGeo, slabMat, tallConcrete.length);
-    slabMesh.castShadow = true;
     for (let i = 0; i < tallConcrete.length; i++) {
       const b = tallConcrete[i];
       const baseY = (b.baseY || 0);
@@ -666,7 +663,6 @@ function buildRooftopDetails(scene, buildings) {
     const acGeo = new THREE.BoxGeometry(1, 1, 1);
     const acMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
     const acMesh = new THREE.InstancedMesh(acGeo, acMat, roofAC.length);
-    acMesh.castShadow = true;
     for (let i = 0; i < roofAC.length; i++) {
       const a = roofAC[i];
       const s = 1.2 + sr() * 1.5;
@@ -879,7 +875,6 @@ function buildStadium(scene) {
   const bowlMat = new THREE.MeshStandardMaterial({ color: 0xDDDDDD, roughness: 0.7, metalness: 0.1 });
   const bowl = new THREE.Mesh(bowlGeo, bowlMat);
   bowl.position.set(sx, 0, sz);
-  bowl.castShadow = true;
   bowl.receiveShadow = true;
   scene.add(bowl);
 
@@ -951,7 +946,6 @@ function buildHarbor(scene) {
 
   // Crane legs (4 legs per crane = 24)
   const legMesh = new THREE.InstancedMesh(craneLegGeo, craneMat, craneCount * 4);
-  legMesh.castShadow = true;
   let legIdx = 0;
 
   // Crane booms (1 per crane = 6)
@@ -989,7 +983,6 @@ function buildHarbor(scene) {
   const containerMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.2 });
   const containerCount = 80;
   const containerMesh = new THREE.InstancedMesh(containerGeo, containerMat, containerCount);
-  containerMesh.castShadow = true;
 
   for (let i = 0; i < containerCount; i++) {
     const row = Math.floor(i / 10);
@@ -1025,7 +1018,6 @@ function buildWaterfrontFeatures(scene) {
   const rim = new THREE.Mesh(rimGeo, rimMat);
   rim.position.set(fwX, fwH + fwR, fwZ);
   rim.rotation.y = Math.PI / 2;
-  rim.castShadow = true;
   scene.add(rim);
 
   // Spokes (instanced cylinders)
@@ -1062,7 +1054,6 @@ function buildWaterfrontFeatures(scene) {
   const towerMat = new THREE.MeshStandardMaterial({ color: 0xC8A888, roughness: 0.8 });
   const tower = new THREE.Mesh(towerGeo, towerMat);
   tower.position.set(ctX, ctH / 2, ctZ);
-  tower.castShadow = true;
   scene.add(tower);
 
   // Clock face (simple circle)
@@ -1106,12 +1097,10 @@ function buildWaterfrontFeatures(scene) {
   const trunkGeo = new THREE.CylinderGeometry(0.2, 0.35, 8, 6);
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8B6B3D });
   const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, palmCount);
-  trunkMesh.castShadow = true;
 
   const frondGeo = new THREE.ConeGeometry(3, 3, 6);
   const frondMat = new THREE.MeshLambertMaterial({ color: 0x228B22 });
   const frondMesh = new THREE.InstancedMesh(frondGeo, frondMat, palmCount);
-  frondMesh.castShadow = true;
 
   for (let i = 0; i < palmCount; i++) {
     const pz = -1000 + (i / palmCount) * 2000;
@@ -1180,12 +1169,10 @@ function buildParksAndTrees(scene) {
     const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 3.5, 5);
     const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a3a1a });
     const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, treePositions.length);
-    trunkMesh.castShadow = true;
 
     const canopyGeo = new THREE.SphereGeometry(2.2, 6, 5);
     const canopyMat = new THREE.MeshLambertMaterial({ color: 0x3a8c25 });
     const canopyMesh = new THREE.InstancedMesh(canopyGeo, canopyMat, treePositions.length);
-    canopyMesh.castShadow = true;
 
     const treeGreens = [
       new THREE.Color(0x2D8B2D), new THREE.Color(0x3A9A3A),
@@ -1269,7 +1256,6 @@ function buildStreetLights(scene) {
   const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, poleH, 4);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
   const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, lights.length);
-  poleMesh.castShadow = true;
 
   // Bulbs
   const bulbGeo = new THREE.SphereGeometry(0.35, 6, 5);

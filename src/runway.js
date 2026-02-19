@@ -163,7 +163,14 @@ export function isOnRunway(x, z) {
   if (Math.abs(x) < RUNWAY_WIDTH / 2 && Math.abs(z) < RUNWAY_LENGTH / 2) return true;
   // Airport 2
   if (Math.abs(x - AIRPORT2_X) < RUNWAY_WIDTH / 2 && Math.abs(z - AIRPORT2_Z) < RUNWAY_LENGTH / 2) return true;
+  // International airport (E-W runways) — imported lazily to avoid circular deps
+  if (_isOnIntlRunway && _isOnIntlRunway(x, z)) return true;
   return false;
+}
+
+let _isOnIntlRunway = null;
+export function registerIntlRunwayCheck(fn) {
+  _isOnIntlRunway = fn;
 }
 
 export function buildAirport(scene, {
@@ -419,14 +426,12 @@ function createTerminalBuilding(scene, x, z) {
   // Main building - wider and taller
   const body = new THREE.Mesh(new THREE.BoxGeometry(80, 14, 35), wallMat);
   body.position.set(x, 7, z);
-  body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
   // Second floor section (recessed)
   const upperBody = new THREE.Mesh(new THREE.BoxGeometry(70, 6, 30), darkWallMat);
   upperBody.position.set(x, 17, z);
-  upperBody.castShadow = true;
   group.add(upperBody);
 
   // Glass facade - ground floor
@@ -442,13 +447,11 @@ function createTerminalBuilding(scene, x, z) {
   // Roof with overhang
   const roof = new THREE.Mesh(new THREE.BoxGeometry(85, 0.8, 40), roofMat);
   roof.position.set(x, 20.4, z);
-  roof.castShadow = true;
   group.add(roof);
 
   // Entrance canopy (extending toward runway)
   const canopy = new THREE.Mesh(new THREE.BoxGeometry(30, 0.4, 12), metalTrimMat);
   canopy.position.set(x, 5, z - 23);
-  canopy.castShadow = true;
   group.add(canopy);
 
   // Canopy support columns
@@ -469,7 +472,6 @@ function createTerminalBuilding(scene, x, z) {
       new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.5 })
     );
     bridgeBody.position.set(x + i * 25, 6, z - 35);
-    bridgeBody.castShadow = true;
     bridgeGroup.add(bridgeBody);
 
     // Bridge windows
@@ -503,7 +505,6 @@ function createHangar(scene, x, z) {
   const hangarMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.5, metalness: 0.3 });
   const hangar = new THREE.Mesh(new THREE.BoxGeometry(50, 16, 40), hangarMat);
   hangar.position.set(x, 8, z);
-  hangar.castShadow = true;
   hangar.receiveShadow = true;
   scene.add(hangar);
 
@@ -516,7 +517,6 @@ function createHangar(scene, x, z) {
   roof.rotation.z = Math.PI / 2;
   roof.rotation.y = Math.PI / 2;
   roof.position.set(x, 16, z);
-  roof.castShadow = true;
   scene.add(roof);
 
   // Large sliding doors
@@ -553,21 +553,18 @@ function createControlTower(scene, x, z) {
   const baseMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.6 });
   const base = new THREE.Mesh(new THREE.BoxGeometry(10, 8, 10), baseMat);
   base.position.set(x, 4, z);
-  base.castShadow = true;
   group.add(base);
 
   // Tower shaft
   const shaftMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 0.5 });
   const shaft = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 4.5, 22, 10), shaftMat);
   shaft.position.set(x, 19, z);
-  shaft.castShadow = true;
   group.add(shaft);
 
   // Observation deck floor (wider platform)
   const deckMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5 });
   const deck = new THREE.Mesh(new THREE.CylinderGeometry(8, 7, 1.5, 10), deckMat);
   deck.position.set(x, 30, z);
-  deck.castShadow = true;
   group.add(deck);
 
   // Glass observation cab
@@ -580,7 +577,6 @@ function createControlTower(scene, x, z) {
   });
   const cab = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 5, 12), cabMat);
   cab.position.set(x, 33.5, z);
-  cab.castShadow = true;
   group.add(cab);
 
   // Observation deck railing posts
@@ -597,7 +593,6 @@ function createControlTower(scene, x, z) {
   const capMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
   const cap = new THREE.Mesh(new THREE.CylinderGeometry(8.5, 8, 1.5, 10), capMat);
   cap.position.set(x, 36.5, z);
-  cap.castShadow = true;
   group.add(cap);
 
   // Antenna array
@@ -634,7 +629,6 @@ function createFuelStation(scene, x, z) {
   const tank = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 2.5, 10, 12), tankMat);
   tank.rotation.z = Math.PI / 2;
   tank.position.set(x, 3.5, z);
-  tank.castShadow = true;
   group.add(tank);
 
   // Tank end caps
@@ -666,7 +660,6 @@ function createFuelStation(scene, x, z) {
   const shelterMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.5 });
   const shelter = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 3), shelterMat);
   shelter.position.set(x + 8, 1.5, z);
-  shelter.castShadow = true;
   group.add(shelter);
 
   scene.add(group);
@@ -691,7 +684,6 @@ function createGroundVehicles(scene, x, z) {
       new THREE.MeshStandardMaterial({ color: 0x666666 })
     );
     cart.position.set(x + 11 + i * 2.5, 0.5, z + 5);
-    cart.castShadow = true;
     group.add(cart);
   }
 
@@ -704,7 +696,6 @@ function createTruck(group, x, z, color, height) {
   // Cab
   const cab = new THREE.Mesh(new THREE.BoxGeometry(2.5, height, 2.5), bodyMat);
   cab.position.set(x - 1.5, height / 2, z);
-  cab.castShadow = true;
   group.add(cab);
 
   // Cargo body
@@ -713,7 +704,6 @@ function createTruck(group, x, z, color, height) {
     new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5 })
   );
   cargo.position.set(x + 1.5, height * 0.4, z);
-  cargo.castShadow = true;
   group.add(cargo);
 
   // Wheels
@@ -738,7 +728,6 @@ function createParkingGarage(scene, x, z) {
   for (let level = 0; level < 3; level++) {
     const floor = new THREE.Mesh(new THREE.BoxGeometry(40, 0.5, 25), concreteMat);
     floor.position.set(x, level * 4 + 0.25, z);
-    floor.castShadow = true;
     floor.receiveShadow = true;
     group.add(floor);
 
@@ -758,7 +747,6 @@ function createParkingGarage(scene, x, z) {
   // Top level roof
   const roof = new THREE.Mesh(new THREE.BoxGeometry(42, 0.5, 27), concreteMat);
   roof.position.set(x, 12.25, z);
-  roof.castShadow = true;
   group.add(roof);
 
   // Ramp on the side

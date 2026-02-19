@@ -135,7 +135,6 @@ function createPier(scene) {
   // Main deck
   const deck = new THREE.Mesh(new THREE.BoxGeometry(pierLen, 0.4, pierWid), woodMat);
   deck.position.set(pierX + pierLen / 2, 1.5, pierZ);
-  deck.castShadow = true;
   deck.receiveShadow = true;
   group.add(deck);
 
@@ -181,7 +180,6 @@ function createPier(scene) {
   const shedMat = new THREE.MeshStandardMaterial({ color: 0xb8a880, roughness: 0.7 });
   const shed = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 5), shedMat);
   shed.position.set(pierX - 2, 2, pierZ);
-  shed.castShadow = true;
   group.add(shed);
 
   const shedRoof = new THREE.Mesh(
@@ -190,7 +188,6 @@ function createPier(scene) {
   );
   shedRoof.rotation.y = Math.PI / 4;
   shedRoof.position.set(pierX - 2, 5, pierZ);
-  shedRoof.castShadow = true;
   group.add(shedRoof);
 
   scene.add(group);
@@ -377,13 +374,11 @@ function createLighthouse(scene) {
   // Stone base
   const base = new THREE.Mesh(new THREE.CylinderGeometry(4, 5, 3, 10), baseMat);
   base.position.set(lx, 1.5, lz);
-  base.castShadow = true;
   group.add(base);
 
   // Tower body (white with red stripe)
   const tower = new THREE.Mesh(new THREE.CylinderGeometry(2.5, 3, 18, 10), whiteMat);
   tower.position.set(lx, 12, lz);
-  tower.castShadow = true;
   group.add(tower);
 
   // Red stripe band
@@ -394,7 +389,6 @@ function createLighthouse(scene) {
   // Observation gallery
   const gallery = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3, 1.5, 10), baseMat);
   gallery.position.set(lx, 21.5, lz);
-  gallery.castShadow = true;
   group.add(gallery);
 
   // Lantern room (glass)
@@ -412,7 +406,6 @@ function createLighthouse(scene) {
     redMat
   );
   dome.position.set(lx, 25, lz);
-  dome.castShadow = true;
   group.add(dome);
 
   // Light beacon (emissive)

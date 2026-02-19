@@ -34,21 +34,21 @@ const SHADOW_QUALITY_PRESETS = Object.freeze({
   low: Object.freeze({
     enabled: false,
     mapSize: 1024,
-    frustum: 520,
+    frustum: 200,
     bias: -0.0002,
     radius: 1,
   }),
   medium: Object.freeze({
     enabled: true,
     mapSize: 1536,
-    frustum: 600,
+    frustum: 200,
     bias: -0.00018,
     radius: 2,
   }),
   high: Object.freeze({
     enabled: true,
     mapSize: 2048,
-    frustum: 680,
+    frustum: 200,
     bias: -0.00014,
     radius: 3,
   }),
@@ -83,10 +83,10 @@ export function initScene(container) {
   sun.shadow.mapSize.height = 2048;
   sun.shadow.camera.near = 100;
   sun.shadow.camera.far = 5000;
-  sun.shadow.camera.left = -600;
-  sun.shadow.camera.right = 600;
-  sun.shadow.camera.top = 600;
-  sun.shadow.camera.bottom = -600;
+  sun.shadow.camera.left = -200;
+  sun.shadow.camera.right = 200;
+  sun.shadow.camera.top = 200;
+  sun.shadow.camera.bottom = -200;
   sun.shadow.bias = -0.0002;
   scene.add(sun);
   scene.add(sun.target);

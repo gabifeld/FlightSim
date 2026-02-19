@@ -23,7 +23,6 @@ function addBox(group, geo, mat, x, y, z, opts = {}) {
   const mesh = new THREE.Mesh(geo, mat);
   mesh.position.set(x, y, z);
   if (opts.ry) mesh.rotation.y = opts.ry;
-  if (opts.castShadow) mesh.castShadow = true;
   if (opts.receiveShadow) mesh.receiveShadow = true;
   group.add(mesh);
   return mesh;
@@ -109,7 +108,6 @@ function createConcourseExtension(scene, ox, oz) {
   // Main corridor running east-west
   const corridor = new THREE.Mesh(new THREE.BoxGeometry(55, 12, 10), wallMat);
   corridor.position.set(cx, 6, cz);
-  corridor.castShadow = true;
   corridor.receiveShadow = true;
   group.add(corridor);
 
@@ -121,7 +119,6 @@ function createConcourseExtension(scene, ox, oz) {
   // Roof overhang
   const roof = new THREE.Mesh(new THREE.BoxGeometry(58, 0.5, 13), _darkMetalMat);
   roof.position.set(cx, 12.3, cz);
-  roof.castShadow = true;
   group.add(roof);
 
   // 2 jet bridges off the concourse
@@ -131,7 +128,6 @@ function createConcourseExtension(scene, ox, oz) {
     const bx = cx - 12 + i * 24;
     const bridge = new THREE.Mesh(new THREE.BoxGeometry(4, 3.5, 14), bridgeMat);
     bridge.position.set(bx, 5, bz);
-    bridge.castShadow = true;
     group.add(bridge);
 
     // Bridge glass
@@ -160,7 +156,6 @@ function createCargoArea(scene, ox, oz) {
   // Main warehouse
   const warehouse = new THREE.Mesh(new THREE.BoxGeometry(60, 10, 25), corrugatedMat);
   warehouse.position.set(cx, 5, cz);
-  warehouse.castShadow = true;
   warehouse.receiveShadow = true;
   group.add(warehouse);
 
@@ -172,13 +167,11 @@ function createCargoArea(scene, ox, oz) {
   warehouseRoof.rotation.z = Math.PI / 2;
   warehouseRoof.rotation.y = Math.PI / 2;
   warehouseRoof.position.set(cx, 10, cz);
-  warehouseRoof.castShadow = true;
   group.add(warehouseRoof);
 
   // Loading dock overhang
   const overhang = new THREE.Mesh(new THREE.BoxGeometry(40, 0.4, 6), corrugatedMat);
   overhang.position.set(cx, 8, cz - 15.5);
-  overhang.castShadow = true;
   group.add(overhang);
 
   // 3 dock doors
@@ -191,7 +184,6 @@ function createCargoArea(scene, ox, oz) {
   // Secondary warehouse
   const warehouse2 = new THREE.Mesh(new THREE.BoxGeometry(35, 8, 18), corrugatedMat);
   warehouse2.position.set(cx + 15, 4, cz + 28);
-  warehouse2.castShadow = true;
   warehouse2.receiveShadow = true;
   group.add(warehouse2);
 
@@ -224,14 +216,12 @@ function createFireStation(scene, ox, oz) {
   // Main building
   const building = new THREE.Mesh(new THREE.BoxGeometry(22, 7, 16), brickMat);
   building.position.set(fx, 3.5, fz);
-  building.castShadow = true;
   building.receiveShadow = true;
   group.add(building);
 
   // Roof
   const roof = new THREE.Mesh(new THREE.BoxGeometry(24, 0.5, 18), _darkMetalMat);
   roof.position.set(fx, 7.25, fz);
-  roof.castShadow = true;
   group.add(roof);
 
   // 3 garage doors (facing runway, +X side)
@@ -245,7 +235,6 @@ function createFireStation(scene, ox, oz) {
   // Hose/drill tower
   const tower = new THREE.Mesh(new THREE.BoxGeometry(4, 12, 4), brickMat);
   tower.position.set(fx - 8, 6, fz + 5);
-  tower.castShadow = true;
   group.add(tower);
 
   // Tower platform
@@ -421,7 +410,6 @@ function createFuelFarm(scene, ox, oz) {
   ];
 
   const tankInstanced = new THREE.InstancedMesh(tankGeo, tankMat, 4);
-  tankInstanced.castShadow = true;
   const dummy = new THREE.Object3D();
   for (let i = 0; i < 4; i++) {
     dummy.position.set(tankPositions[i].x, 5, tankPositions[i].z);
@@ -459,7 +447,6 @@ function createFuelFarm(scene, ox, oz) {
   // Small pump house
   const pumpHouse = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 3), _concreteMat);
   pumpHouse.position.set(fx + bermW / 2 + 3, 1.5, fz);
-  pumpHouse.castShadow = true;
   group.add(pumpHouse);
 
   // Piping between tanks (horizontal pipes)
@@ -491,7 +478,6 @@ function createWaterTower(scene, ox, oz) {
   // Spherical tank
   const tank = new THREE.Mesh(new THREE.SphereGeometry(4.5, 12, 10), tankColor);
   tank.position.set(wx, 22, wz);
-  tank.castShadow = true;
   group.add(tank);
 
   // 4 legs
@@ -573,7 +559,6 @@ function createRadarDome(scene, ox, oz) {
   // Equipment shelter
   const shelter = new THREE.Mesh(new THREE.BoxGeometry(5, 3, 4), _concreteMat);
   shelter.position.set(rx + 7, 1.5, rz);
-  shelter.castShadow = true;
   group.add(shelter);
 
   // Antenna mast
@@ -653,7 +638,6 @@ function createDeIcingPad(scene, ox, oz) {
   // Small operations building
   const opsBldg = new THREE.Mesh(new THREE.BoxGeometry(6, 3, 5), _concreteMat);
   opsBldg.position.set(dx - 8, 1.5, dz + 6);
-  opsBldg.castShadow = true;
   group.add(opsBldg);
 
   scene.add(group);
@@ -732,14 +716,12 @@ function createAirportHotel(scene, ox, oz) {
   // Main building (6-story)
   const building = new THREE.Mesh(new THREE.BoxGeometry(28, 18, 22), hotelMat);
   building.position.set(hx, 9, hz);
-  building.castShadow = true;
   building.receiveShadow = true;
   group.add(building);
 
   // Flat roof
   const roof = new THREE.Mesh(new THREE.BoxGeometry(30, 0.5, 24), roofMat);
   roof.position.set(hx, 18.25, hz);
-  roof.castShadow = true;
   group.add(roof);
 
   // Glass lobby extension
@@ -753,7 +735,6 @@ function createAirportHotel(scene, ox, oz) {
     new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.5 })
   );
   canopy.position.set(hx, 5, hz - 20);
-  canopy.castShadow = true;
   group.add(canopy);
 
   // Canopy support columns
@@ -806,7 +787,6 @@ function createMaintenanceHangars(scene, ox, oz) {
     // Hangar body
     const body = new THREE.Mesh(new THREE.BoxGeometry(25, 8, 18), hangarMat);
     body.position.set(mx, 4, mz);
-    body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
 
@@ -818,7 +798,6 @@ function createMaintenanceHangars(scene, ox, oz) {
     roofCurve.rotation.z = Math.PI / 2;
     roofCurve.rotation.y = Math.PI / 2;
     roofCurve.position.set(mx, 8, mz);
-    roofCurve.castShadow = true;
     group.add(roofCurve);
 
     // Open front door (just the door frame opening - darker interior)
@@ -853,7 +832,6 @@ function createGSETruck(group, x, z, color, height, ry = 0) {
   const cab = new THREE.Mesh(new THREE.BoxGeometry(2.5, height, 2.5), bodyMat);
   cab.position.set(x - 1.5, height / 2, z);
   cab.rotation.y = ry;
-  cab.castShadow = true;
   group.add(cab);
 
   const cargo = new THREE.Mesh(
@@ -862,7 +840,6 @@ function createGSETruck(group, x, z, color, height, ry = 0) {
   );
   cargo.position.set(x + 1.5, height * 0.4, z);
   cargo.rotation.y = ry;
-  cargo.castShadow = true;
   group.add(cargo);
 }
 
@@ -881,7 +858,6 @@ function createExtraGSE(scene, ox, oz) {
     const bz = oz - 15 + i * 30;
     const base = new THREE.Mesh(new THREE.BoxGeometry(5, 1.2, 2), beltMat);
     base.position.set(bx, 0.6, bz);
-    base.castShadow = true;
     group.add(base);
 
     // Conveyor belt (angled)
@@ -908,7 +884,6 @@ function createExtraGSE(scene, ox, oz) {
   for (const cp of cartPositions) {
     const cart = new THREE.Mesh(cartGeo, cartMat);
     cart.position.set(cp.x, 0.5, cp.z);
-    cart.castShadow = true;
     group.add(cart);
   }
 

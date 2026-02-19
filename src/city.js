@@ -538,7 +538,6 @@ function buildBuildings(scene, placements) {
     const facadeTex = createBuildingFacadeTexture();
     const mat = new THREE.MeshStandardMaterial({ map: facadeTex, roughness: 0.85, metalness: 0.05 });
     const mesh = new THREE.InstancedMesh(unitBox, mat, concrete.length);
-    mesh.castShadow = true;
     mesh.receiveShadow = true;
 
     for (let i = 0; i < concrete.length; i++) {
@@ -565,7 +564,6 @@ function buildBuildings(scene, placements) {
       metalness: 0.7,
     });
     const glassMesh = new THREE.InstancedMesh(unitBox, glassMat, glass.length);
-    glassMesh.castShadow = true;
     glassMesh.receiveShadow = true;
 
     for (let i = 0; i < glass.length; i++) {
@@ -587,7 +585,6 @@ function buildBuildings(scene, placements) {
   if (podiums.length > 0) {
     const podMat = new THREE.MeshStandardMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
     const podMesh = new THREE.InstancedMesh(unitBox, podMat, podiums.length);
-    podMesh.castShadow = true;
     podMesh.receiveShadow = true;
 
     for (let i = 0; i < podiums.length; i++) {
@@ -678,7 +675,6 @@ function buildRooftopDetails(scene, placements) {
     const acGeo = new THREE.BoxGeometry(1, 1, 1);
     const acMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
     const acMesh = new THREE.InstancedMesh(acGeo, acMat, roofAC.length);
-    acMesh.castShadow = true;
 
     for (let i = 0; i < roofAC.length; i++) {
       const a = roofAC[i];
@@ -859,12 +855,10 @@ function buildParks(scene, placements) {
     const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 3.5, 5);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1a, roughness: 0.9 });
     const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, treePositions.length);
-    trunkMesh.castShadow = true;
 
     const canopyGeo = new THREE.SphereGeometry(2.2, 6, 5);
     const canopyMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
     const canopyMesh = new THREE.InstancedMesh(canopyGeo, canopyMat, treePositions.length);
-    canopyMesh.castShadow = true;
     canopyMesh.receiveShadow = true;
 
     // Varied greens + autumn touches
@@ -962,7 +956,6 @@ function buildStreetLights(scene) {
   const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, poleH, 4);
   const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
   const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, lights.length);
-  poleMesh.castShadow = true;
 
   // Warm glow bulbs (#FFE4B5 = Moccasin warm)
   const bulbGeo = new THREE.SphereGeometry(0.35, 6, 5);
