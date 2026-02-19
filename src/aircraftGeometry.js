@@ -2,6 +2,20 @@ import * as THREE from 'three';
 import { getEnvironmentMap, isNight } from './scene.js';
 import { getSetting, isSettingExplicit } from './settings.js';
 
+// Toon outline for stylized aircraft look
+const _outlineMat = new THREE.MeshBasicMaterial({
+  color: 0x222222,
+  side: THREE.BackSide,
+});
+
+function addOutline(mesh, thickness = 0.04) {
+  if (!mesh.geometry) return;
+  const outline = new THREE.Mesh(mesh.geometry, _outlineMat);
+  outline.scale.multiplyScalar(1 + thickness);
+  outline.raycast = () => {}; // not pickable
+  mesh.add(outline);
+}
+
 // Module-level state (set during build, returned as struct)
 let aircraftGroup;
 let propeller;
@@ -2269,6 +2283,11 @@ export function buildAircraftModel(scene, type) {
   addAircraftLights(detail, layout);
   addSharedAirframeDetails(detail, mats, layout, type, variant);
   buildCockpitInterior(type, detail, mats, layout);
+
+  // Apply toon outlines to major body parts (fuselage, wings, tail)
+  for (const part of exteriorBodyParts) {
+    addOutline(part, 0.04);
+  }
 
   return {
     aircraftGroup,
