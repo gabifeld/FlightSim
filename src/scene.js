@@ -1,7 +1,6 @@
 import * as THREE from 'three';
-import { Sky } from 'three/addons/objects/Sky.js';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
-import { DEFAULT_TIME_OF_DAY, TIME_CYCLE_RATE, TERRAIN_SIZE } from './constants.js';
+import { DEFAULT_TIME_OF_DAY, TIME_CYCLE_RATE, TERRAIN_SIZE, CAMERA_FAR } from './constants.js';
 import { clamp, lerp } from './utils.js';
 
 export let scene, renderer;
@@ -118,17 +117,76 @@ export function initScene(container) {
   return { scene, renderer };
 }
 
-function createSky() {
-  sky = new Sky();
-  sky.scale.setScalar(TERRAIN_SIZE);
-  sky.material.fog = false;
-  scene.add(sky);
+// Sky color palettes for time-of-day
+const SKY_PALETTES = {
+  dawn:  { horizon: [0.9, 0.6, 0.4],   zenith: [0.3, 0.35, 0.6],  sun: [1, 0.7, 0.4] },
+  day:   { horizon: [0.75, 0.82, 0.92], zenith: [0.3, 0.5, 0.85],  sun: [1, 0.95, 0.8] },
+  dusk:  { horizon: [0.9, 0.5, 0.3],    zenith: [0.2, 0.2, 0.5],   sun: [1, 0.6, 0.3] },
+  night: { horizon: [0.05, 0.05, 0.1],  zenith: [0.02, 0.02, 0.08], sun: [0.1, 0.1, 0.2] },
+};
 
-  const skyUniforms = sky.material.uniforms;
-  skyUniforms['turbidity'].value = 0.3;
-  skyUniforms['rayleigh'].value = 2.5;
-  skyUniforms['mieCoefficient'].value = 0.0003;
-  skyUniforms['mieDirectionalG'].value = 0.7;
+function lerpPalette(a, b, t) {
+  return {
+    horizon: a.horizon.map((v, i) => v + (b.horizon[i] - v) * t),
+    zenith:  a.zenith.map((v, i) => v + (b.zenith[i] - v) * t),
+    sun:     a.sun.map((v, i) => v + (b.sun[i] - v) * t),
+  };
+}
+
+function getSkyPalette(sunElevation) {
+  if (sunElevation > 15) return SKY_PALETTES.day;
+  if (sunElevation > 0) {
+    const t = sunElevation / 15;
+    return lerpPalette(SKY_PALETTES.dawn, SKY_PALETTES.day, t);
+  }
+  if (sunElevation > -5) {
+    const t = (sunElevation + 5) / 5;
+    return lerpPalette(SKY_PALETTES.night, SKY_PALETTES.dusk, t);
+  }
+  return SKY_PALETTES.night;
+}
+
+function createSky() {
+  const skyGeo = new THREE.SphereGeometry(CAMERA_FAR * 0.9, 32, 16);
+  const skyMat = new THREE.ShaderMaterial({
+    uniforms: {
+      horizonColor: { value: new THREE.Color(0.75, 0.82, 0.92) },
+      zenithColor:  { value: new THREE.Color(0.3, 0.5, 0.85) },
+      sunColor:     { value: new THREE.Color(1.0, 0.95, 0.8) },
+      sunDirection: { value: new THREE.Vector3(0, 1, 0) },
+      sunSize:      { value: 0.03 },
+    },
+    vertexShader: `
+      varying vec3 vWorldDir;
+      void main() {
+        vec4 worldPos = modelMatrix * vec4(position, 1.0);
+        vWorldDir = normalize(worldPos.xyz - cameraPosition);
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 horizonColor, zenithColor, sunColor, sunDirection;
+      uniform float sunSize;
+      varying vec3 vWorldDir;
+      void main() {
+        float y = max(vWorldDir.y, 0.0);
+        vec3 sky = mix(horizonColor, zenithColor, pow(y, 0.6));
+        // Below horizon: darken toward ground
+        float belowH = max(-vWorldDir.y, 0.0);
+        sky = mix(sky, horizonColor * 0.7, pow(belowH, 0.4));
+        float sunDot = max(dot(normalize(vWorldDir), sunDirection), 0.0);
+        sky += sunColor * pow(sunDot, 256.0) * 2.0; // sun disc
+        sky += sunColor * pow(sunDot, 8.0) * 0.3;   // sun glow
+        gl_FragColor = vec4(sky, 1.0);
+      }
+    `,
+    side: THREE.BackSide,
+    depthWrite: false,
+  });
+
+  sky = new THREE.Mesh(skyGeo, skyMat);
+  sky.renderOrder = -1;
+  scene.add(sky);
 
   setSunPosition(45, 180);
 }
@@ -146,14 +204,12 @@ export function generateEnvironmentMap() {
   lastEnvMapSunElevation = currentSunElev;
 
   const skyScene = new THREE.Scene();
-  const skyCopy = sky.clone();
-  skyCopy.material = sky.material;
+  const skyCopy = new THREE.Mesh(sky.geometry, sky.material);
   skyScene.add(skyCopy);
 
   if (!pmremGenerator) pmremGenerator = new THREE.PMREMGenerator(renderer);
   if (envMapRT) envMapRT.dispose();
-  envMapRT = pmremGenerator.fromScene(skyScene, 0, 0.1, TERRAIN_SIZE * 1.6);
-  // Do NOT set scene.environment — only aircraft materials use this via getEnvironmentMap()
+  envMapRT = pmremGenerator.fromScene(skyScene, 0, 0.1, CAMERA_FAR);
   skyScene.remove(skyCopy);
 }
 
@@ -168,7 +224,7 @@ export function setSunPosition(elevationDeg, azimuthDeg) {
   sunPosition.setFromSphericalCoords(1, phi, theta);
 
   if (sky) {
-    sky.material.uniforms['sunPosition'].value.copy(sunPosition);
+    sky.material.uniforms.sunDirection.value.copy(sunPosition).normalize();
   }
 
   // Sync directional light with sky sun
@@ -363,18 +419,17 @@ function updateTimeOfDayLighting() {
     }
   }
 
-  // Fog color (weather system controls density via weatherFx.js)
+  // Sky palette + fog color matched to horizon
+  const skyPalette = getSkyPalette(sunElevation);
+  if (sky) {
+    sky.material.uniforms.horizonColor.value.setRGB(...skyPalette.horizon);
+    sky.material.uniforms.zenithColor.value.setRGB(...skyPalette.zenith);
+    sky.material.uniforms.sunColor.value.setRGB(...skyPalette.sun);
+  }
+
+  // Fog color matches sky horizon for seamless blending
   if (scene.fog) {
-    _fogColor.setHex(0x000000);
-    if (sunElevation > 10) {
-      _fogColor.setHSL(0.57, 0.35, 0.76);
-    } else if (sunElevation > 0) {
-      // Sunset/sunrise: warm orange
-      const t = sunElevation / 10;
-      _fogColor.setHSL(0.08 + t * 0.49, 0.65, 0.3 + t * 0.42);
-    } else {
-      _fogColor.setHSL(0.62, 0.3, 0.08);
-    }
+    _fogColor.setRGB(...skyPalette.horizon);
     scene.fog.color.copy(_fogColor);
     renderer.setClearColor(_fogColor);
   }
@@ -412,22 +467,6 @@ function updateTimeOfDayLighting() {
     lensflare.visible = sunElevation > 0;
   }
 
-  // Sky parameters for sunrise/sunset
-  if (sky) {
-    const skyUniforms = sky.material.uniforms;
-    if (sunElevation < 10 && sunElevation > -5) {
-      // Sunset/sunrise: more turbidity for warm colors
-      skyUniforms['turbidity'].value = lerp(6, 0.3, clamp(sunElevation / 10, 0, 1));
-      skyUniforms['rayleigh'].value = lerp(2.0, 2.5, clamp(sunElevation / 10, 0, 1));
-    } else if (sunElevation <= -5) {
-      skyUniforms['turbidity'].value = 2;
-      skyUniforms['rayleigh'].value = 0.5;
-    } else {
-      // Deep clear blue sky during day
-      skyUniforms['turbidity'].value = 0.3;
-      skyUniforms['rayleigh'].value = 2.5;
-    }
-  }
 }
 
 export function updateSunTarget(target) {
