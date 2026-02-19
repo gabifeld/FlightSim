@@ -597,9 +597,9 @@ const TREE_COLOR_PALETTE = [
 ];
 
 const VEGETATION_DENSITY_PROFILE = {
-  low: { trees: 2500, bushes: 1600, deadTrees: 400, nearRadius: 900, midRadius: 2600, nearTreeCap: 700, nearBushCap: 450, nearDeadCap: 120, impostorCap: 1200 },
-  medium: { trees: 4200, bushes: 2600, deadTrees: 700, nearRadius: 1150, midRadius: 3200, nearTreeCap: 1200, nearBushCap: 700, nearDeadCap: 200, impostorCap: 2100 },
-  high: { trees: 6000, bushes: 4000, deadTrees: 1000, nearRadius: 1450, midRadius: 3900, nearTreeCap: 1800, nearBushCap: 1000, nearDeadCap: 320, impostorCap: 3200 },
+  low: { trees: 1500, bushes: 600, deadTrees: 200, nearRadius: 900, midRadius: 2600, nearTreeCap: 500, nearBushCap: 300, nearDeadCap: 80, impostorCap: 800 },
+  medium: { trees: 2800, bushes: 1000, deadTrees: 350, nearRadius: 1150, midRadius: 3200, nearTreeCap: 900, nearBushCap: 500, nearDeadCap: 140, impostorCap: 1500 },
+  high: { trees: 4000, bushes: 1500, deadTrees: 500, nearRadius: 1450, midRadius: 3900, nearTreeCap: 1400, nearBushCap: 700, nearDeadCap: 200, impostorCap: 2400 },
 };
 
 const vegetationLodState = {
@@ -1424,31 +1424,34 @@ let cloudShadowMats = [];
 
 const CLOUD_QUALITY_CONFIG = {
   low: {
-    cumulusCount: 380,
-    cirrusCount: 90,
+    cumulusCount: 90,
+    cirrusCount: 30,
     cumulusPuffMin: 10,
     cumulusPuffMax: 15,
     cirrusWispMin: 3,
     cirrusWispMax: 5,
     area: 50000,
+    puffScale: 1.6,
   },
   medium: {
-    cumulusCount: 560,
-    cirrusCount: 140,
+    cumulusCount: 190,
+    cirrusCount: 60,
     cumulusPuffMin: 12,
     cumulusPuffMax: 18,
     cirrusWispMin: 4,
     cirrusWispMax: 6,
     area: 52000,
+    puffScale: 1.3,
   },
   high: {
-    cumulusCount: 760,
-    cirrusCount: 200,
+    cumulusCount: 320,
+    cirrusCount: 80,
     cumulusPuffMin: 14,
     cumulusPuffMax: 22,
     cirrusWispMin: 5,
     cirrusWispMax: 8,
     area: 56000,
+    puffScale: 1.0,
   },
 };
 const CLOUD_DENSITY_ORDER = ['none', 'few', 'normal', 'many'];
@@ -1585,6 +1588,7 @@ export function createClouds(scene) {
   }
 
   const area = quality.area;
+  const puffScale = quality.puffScale || 1.0;
 
   // Cumulus clusters
   for (let c = 0; c < quality.cumulusCount; c++) {
@@ -1608,9 +1612,9 @@ export function createClouds(scene) {
         ? cloudCumulusMats[2 + Math.floor(Math.random() * 3)]
         : cloudCumulusMats[Math.floor(Math.random() * 3)];
       const sprite = new THREE.Sprite(mat);
-      const s = isCore
+      const s = (isCore
         ? (240 + Math.random() * 320)
-        : (150 + Math.random() * 230);
+        : (150 + Math.random() * 230)) * puffScale;
       sprite.scale.set(s, s * (0.42 + Math.random() * 0.26), 1);
       const spread = isCore ? 0.38 : 1.0;
       sprite.position.set(
@@ -1626,7 +1630,7 @@ export function createClouds(scene) {
     for (let s = 0; s < shadeCount; s++) {
       const mat = cloudShadowMats[Math.floor(Math.random() * cloudShadowMats.length)];
       const sprite = new THREE.Sprite(mat);
-      const sz = 170 + Math.random() * 230;
+      const sz = (170 + Math.random() * 230) * puffScale;
       sprite.scale.set(sz, sz * 0.28, 1);
       sprite.position.set(
         (Math.random() - 0.5) * cloudW * 0.65,
@@ -1655,7 +1659,7 @@ export function createClouds(scene) {
     for (let w = 0; w < wispCount; w++) {
       const mat = cloudCirrusMats[Math.floor(Math.random() * cloudCirrusMats.length)];
       const sprite = new THREE.Sprite(mat);
-      const sw = 520 + Math.random() * 760;
+      const sw = (520 + Math.random() * 760) * puffScale;
       sprite.scale.set(sw, sw * (0.07 + Math.random() * 0.04), 1);
       sprite.position.set(
         (Math.random() - 0.5) * 700,
