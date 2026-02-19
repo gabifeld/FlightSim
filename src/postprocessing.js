@@ -10,18 +10,36 @@ import { getSetting, isSettingExplicit } from './settings.js';
 let composer;
 let bloomPass;
 let postFxQuality = 'high';
+let useComposer = true;
+let _renderer = null;
+let _scene = null;
+let _camera = null;
 
 export function initPostProcessing(renderer, scene, camera) {
+  _renderer = renderer;
+  _scene = scene;
+  _camera = camera;
+
   const size = renderer.getSize(new THREE.Vector2());
   postFxQuality = isSettingExplicit('postFxQuality') ? getSetting('postFxQuality') : getSetting('graphicsQuality');
+
+  // Low quality: skip composer entirely, render direct
+  if (postFxQuality === 'low') {
+    useComposer = false;
+    composer = null;
+    bloomPass = null;
+    return null;
+  }
+
+  useComposer = true;
   composer = new EffectComposer(renderer);
 
   // 1. Base render pass
   const renderPass = new RenderPass(scene, camera);
   composer.addPass(renderPass);
 
-  // 2. Bloom — only on high quality; use half-res for performance
-  if (postFxQuality === 'high') {
+  // 2. Bloom — medium uses half-res, high uses half-res too
+  if (postFxQuality === 'medium' || postFxQuality === 'high') {
     bloomPass = new UnrealBloomPass(
       new THREE.Vector2(Math.floor(size.x / 2), Math.floor(size.y / 2)),
       0.15,
@@ -53,8 +71,11 @@ export function updatePostProcessing() {
 }
 
 export function renderFrame() {
-  if (!composer) return;
-  composer.render();
+  if (useComposer && composer) {
+    composer.render();
+  } else if (_renderer && _scene && _camera) {
+    _renderer.render(_scene, _camera);
+  }
 }
 
 export function onResize(w, h) {
