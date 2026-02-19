@@ -328,6 +328,26 @@ export function updateCamera(dt) {
     camera.position.add(shakeOffset);
     camera.lookAt(state.position);
   }
+
+  // G-force FOV compression (aircraft only)
+  if (isAircraft(state)) {
+    const gForce = state.gForce || 1.0;
+    const baseFOV = 65;
+    const gFovOffset = (gForce - 1.0) * -2.0;
+    camera.fov = clamp(baseFOV + gFovOffset, 50, 85);
+    camera.updateProjectionMatrix();
+
+    // Stall buffet camera shake
+    const stallAngle = (state.config && state.config.stallAoa) || 0.38;
+    if (state.aoa > stallAngle * 0.85 && state.speed > 5) {
+      const intensity = clamp((state.aoa - stallAngle * 0.85) / (stallAngle * 0.15), 0, 1);
+      const time = performance.now() * 0.001;
+      const buffetY = Math.sin(time * 37) * Math.cos(time * 53) * intensity * 0.3;
+      const buffetX = Math.sin(time * 43) * Math.cos(time * 31) * intensity * 0.15;
+      camera.position.y += buffetY;
+      camera.position.x += buffetX;
+    }
+  }
 }
 
 export function setReplayCameraMode(enabled) {
