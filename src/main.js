@@ -1,6 +1,6 @@
 import { initScene, scene, renderer, updateSunTarget, updateTimeOfDay, getTimeOfDay, isNight, ambientLight, configureShadowQuality, generateEnvironmentMap, setResizeCallback } from './scene.js';
-import { createTerrain, createVegetation, createWater, createClouds, updateWater, updateClouds, updateCloudColors, createRuralStructures, createHighway, createRockFormations, createWildflowers, setCloudQuality, updateVegetationLOD } from './terrain.js';
-import { createRunway } from './runway.js';
+import { createTerrain, createVegetation, createWater, createClouds, updateWater, updateClouds, updateCloudColors, createRuralStructures, createHighway, createRockFormations, createWildflowers, setCloudQuality, updateVegetationLOD, buildTerrainHeightCache } from './terrain.js';
+import { createRunway, registerIntlRunwayCheck } from './runway.js';
 import { createAircraft, updateAircraftVisual } from './aircraft.js';
 import { getActiveVehicle, isAircraft, isCar } from './vehicleState.js';
 import { initControls, setCallbacks, updateThrottle, updateControlsGamepad, getKeys } from './controls.js';
@@ -16,7 +16,7 @@ import {
 import { initPostProcessing, updatePostProcessing, renderFrame, onResize } from './postprocessing.js';
 import { initAudio, updateAudio, setRainVolume } from './audio.js';
 import { initWeather, updateWeather, getWeatherState } from './weather.js';
-import { initTaxiGuidance } from './taxi.js';
+import { initTaxiGuidance, registerIntlTaxiChecks } from './taxi.js';
 import { isLandingMode } from './landing.js';
 import { MAX_DT } from './constants.js';
 
@@ -40,11 +40,23 @@ import { initPerfProbe, updatePerfProbe } from './debugPerf.js';
 import { initGroundVehicleAI, updateGroundVehicleAI } from './groundVehicleAI.js';
 import { updateCarPhysics } from './carPhysics.js';
 import { initCarSpawn, spawnCar, despawnCar, updateCarVisual, isCarSpawned } from './carSpawn.js';
+import { createInternationalAirport, createIntlAirportLights, updateIntlAirportLights, setIntlNightMode, isOnIntlRunway, isOnIntlTaxiway } from './internationalAirport.js';
+import { initAircraftAI, updateAircraftAI, resetAircraftAI } from './aircraftAI.js';
+import { initHints, updateHints, resetHints } from './hints.js';
 
 // Init settings (localStorage persistence)
 initSettings();
 
+// Loading screen progress
+function setLoadProgress(pct, text) {
+  const bar = document.getElementById('loading-bar');
+  const label = document.getElementById('loading-text');
+  if (bar) bar.style.width = pct + '%';
+  if (label) label.textContent = text;
+}
+
 // Init
+setLoadProgress(5, 'Initializing...');
 const container = document.getElementById('app');
 initScene(container);
 const camera = initCamera();
@@ -62,20 +74,26 @@ setResizeCallback(onResize);
 initPerfProbe(renderer);
 
 // Create world
+setLoadProgress(10, 'Creating terrain...');
 const terrain = createTerrain();
 scene.add(terrain);
+buildTerrainHeightCache();
 createWater(scene);
 createRunway(scene);
 createHighway(scene);
+setLoadProgress(25, 'Growing vegetation...');
 createVegetation(scene);
 createRuralStructures(scene);
 createRockFormations(scene);
 createWildflowers(scene);
+setLoadProgress(40, 'Building airports...');
 createCity(scene);
 createCapeTownCity(scene);
 createCoastal(scene);
 createClouds(scene);
 createAircraft(scene);
+
+setLoadProgress(55, 'Setting up lighting...');
 
 // Taxi guidance system
 initTaxiGuidance(scene);
@@ -83,11 +101,22 @@ initTaxiGuidance(scene);
 // Airport ground vehicles (AI)
 initGroundVehicleAI(scene);
 
+// AI aircraft (fly between airports)
+initAircraftAI(scene);
+
 // Car spawn system
 initCarSpawn(scene);
 
+// International airport
+createInternationalAirport(scene);
+createIntlAirportLights(scene);
+registerIntlRunwayCheck(isOnIntlRunway);
+registerIntlTaxiChecks(isOnIntlRunway, isOnIntlTaxiway);
+
 // Airport lighting system
 initAirportLights(scene);
+
+setLoadProgress(70, 'Initializing systems...');
 
 // Particle effects
 initParticles(scene);
@@ -111,8 +140,29 @@ initGamepad();
 // Generate environment map for PBR reflections (must be after scene objects are added)
 generateEnvironmentMap();
 
+setLoadProgress(85, 'Preparing audio...');
+
 // Mobile touch/tilt controls
 initMobile();
+
+// Contextual hints
+initHints();
+
+// Loading complete — fade out loading screen
+setLoadProgress(100, 'Ready!');
+setTimeout(() => {
+  const ls = document.getElementById('loading-screen');
+  if (ls) ls.classList.add('fade-out');
+}, 300);
+
+function resetFlight() {
+  resetChallenge();
+  resetState();
+  resetGPWS();
+  resetHints();
+  initAutopilot();
+  resetAircraftAI();
+}
 
 // Controls
 initControls();
@@ -123,10 +173,7 @@ setCallbacks({
     if (s === FlightState.CRASHED || s === FlightState.GROUNDED || isLandingMode()) {
       // If in car, despawn it (unregister auto-restores aircraft as active)
       if (isCarSpawned()) despawnCar();
-      resetChallenge();
-      resetState();
-      resetGPWS();
-      initAutopilot();
+      resetFlight();
     }
   },
   onCarSpawn: (typeName) => {
@@ -142,17 +189,11 @@ initMenu();
 setMenuCallbacks({
   onResume: (action) => {
     if (action === 'reset') {
-      resetChallenge();
-      resetState();
-      resetGPWS();
-      initAutopilot();
+      resetFlight();
     }
   },
   onMainMenu: () => {
-    resetChallenge();
-    resetState();
-    resetGPWS();
-    initAutopilot();
+    resetFlight();
     // Show aircraft select again
     const selectPanel = document.getElementById('aircraft-select');
     if (selectPanel) selectPanel.classList.remove('hidden');
@@ -224,6 +265,9 @@ function gameLoop(time) {
       // GPWS
       updateGPWS(dt);
 
+      // Contextual hints
+      updateHints(getActiveVehicle(), flightState, dt);
+
       // Record for replay
       updateRecording(dt);
     }
@@ -254,6 +298,9 @@ function gameLoop(time) {
 
     // AI ground vehicles (always update)
     updateGroundVehicleAI(dt);
+
+    // AI aircraft (fly between airports)
+    updateAircraftAI(dt);
   }
 
   updateCamera(dt);
@@ -264,14 +311,15 @@ function gameLoop(time) {
   updateWater(dt, weather.windVector);
 
   // Cloud drift with wind + time-of-day coloring
+  const activeVehicle = getActiveVehicle();
   updateClouds(
     dt,
     weather.windVector,
-    getActiveVehicle().position.y,
-    getActiveVehicle().position.x,
-    getActiveVehicle().position.z
+    activeVehicle.position.y,
+    activeVehicle.position.x,
+    activeVehicle.position.z
   );
-  updateVegetationLOD(getActiveVehicle().position.x, getActiveVehicle().position.z);
+  updateVegetationLOD(activeVehicle.position.x, activeVehicle.position.z);
   const tod = getTimeOfDay();
   const sunElev = (tod >= 6 && tod <= 18) ? 90 * Math.sin(Math.PI * (tod - 6) / 12) : -10;
   updateCloudColors(sunElev);
@@ -289,7 +337,9 @@ function gameLoop(time) {
   // Night mode updates (airport + city lights)
   const nightActive = isNight();
   setNightMode(nightActive);
+  setIntlNightMode(nightActive);
   updateAirportLights(dt);
+  updateIntlAirportLights(dt);
   updateCityNight(nightActive);
   updateCapeTownNight(nightActive);
 
@@ -297,7 +347,7 @@ function gameLoop(time) {
   updatePostProcessing();
 
   // Keep sun shadow frustum centered on aircraft
-  updateSunTarget(getActiveVehicle().position);
+  updateSunTarget(activeVehicle.position);
 
   // Render through post-processing pipeline
   renderFrame();

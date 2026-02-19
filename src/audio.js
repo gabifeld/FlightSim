@@ -10,6 +10,7 @@ let stallOsc;
 let stallGain;
 let rainNoise;
 let rainGain;
+let thunderBuffer = null;
 let initialized = false;
 
 function createNoiseBuffer(duration) {
@@ -108,6 +109,9 @@ export function initAudio() {
   rainFilter.connect(rainGain);
   rainGain.connect(masterGain);
   rainNoise.start();
+
+  // Pre-allocate thunder noise buffer
+  thunderBuffer = createNoiseBuffer(2);
 }
 
 export function updateAudio(state, dt) {
@@ -150,10 +154,10 @@ export function setMasterVolume(volume) {
 }
 
 export function playThunder() {
-  if (!ctx) return;
+  if (!ctx || !thunderBuffer) return;
   // Low-frequency rumble
   const source = ctx.createBufferSource();
-  source.buffer = createNoiseBuffer(2);
+  source.buffer = thunderBuffer;
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'lowpass';
@@ -207,23 +211,62 @@ export function playTouchdownSound(intensity) {
 
 export function playCrashSound() {
   if (!ctx) return;
-  const source = ctx.createBufferSource();
-  source.buffer = createNoiseBuffer(1);
+  const now = ctx.currentTime;
 
-  const filter = ctx.createBiquadFilter();
-  filter.type = 'lowpass';
-  filter.frequency.setValueAtTime(2000, ctx.currentTime);
-  filter.frequency.exponentialRampToValueAtTime(100, ctx.currentTime + 0.8);
+  // Layer 1: Low rumble (40Hz sine, 0.3s)
+  const rumbleOsc = ctx.createOscillator();
+  rumbleOsc.type = 'sine';
+  rumbleOsc.frequency.value = 40;
+  const rumbleGain = ctx.createGain();
+  rumbleGain.gain.setValueAtTime(0.4, now);
+  rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+  rumbleOsc.connect(rumbleGain);
+  rumbleGain.connect(masterGain);
+  rumbleOsc.start(now);
+  rumbleOsc.stop(now + 0.4);
 
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.5, ctx.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.8);
+  // Layer 2: Metal crunch (noise through highpass at 1000Hz, 0.2s)
+  const crunchSource = ctx.createBufferSource();
+  crunchSource.buffer = createNoiseBuffer(0.3);
+  const crunchFilter = ctx.createBiquadFilter();
+  crunchFilter.type = 'highpass';
+  crunchFilter.frequency.value = 1000;
+  const crunchGain = ctx.createGain();
+  crunchGain.gain.setValueAtTime(0.4, now);
+  crunchGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+  crunchSource.connect(crunchFilter);
+  crunchFilter.connect(crunchGain);
+  crunchGain.connect(masterGain);
+  crunchSource.start(now);
+  crunchSource.stop(now + 0.3);
 
-  source.connect(filter);
-  filter.connect(gain);
-  gain.connect(masterGain);
-  source.start();
-  source.stop(ctx.currentTime + 1);
+  // Layer 3: Glass tinkle (sine 3000Hz, 0.1s)
+  const glassOsc = ctx.createOscillator();
+  glassOsc.type = 'sine';
+  glassOsc.frequency.value = 3000;
+  const glassGain = ctx.createGain();
+  glassGain.gain.setValueAtTime(0.15, now + 0.05);
+  glassGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+  glassOsc.connect(glassGain);
+  glassGain.connect(masterGain);
+  glassOsc.start(now + 0.05);
+  glassOsc.stop(now + 0.2);
+
+  // Layer 4: Overall impact noise (lowpass sweep for body)
+  const impactSource = ctx.createBufferSource();
+  impactSource.buffer = createNoiseBuffer(1);
+  const impactFilter = ctx.createBiquadFilter();
+  impactFilter.type = 'lowpass';
+  impactFilter.frequency.setValueAtTime(2000, now);
+  impactFilter.frequency.exponentialRampToValueAtTime(100, now + 0.8);
+  const impactGain = ctx.createGain();
+  impactGain.gain.setValueAtTime(0.4, now);
+  impactGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+  impactSource.connect(impactFilter);
+  impactFilter.connect(impactGain);
+  impactGain.connect(masterGain);
+  impactSource.start(now);
+  impactSource.stop(now + 1);
 }
 
 export function playAPDisconnect() {

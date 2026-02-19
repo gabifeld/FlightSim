@@ -5,7 +5,7 @@ import { isInOcean } from './terrain.js';
 import { showMessage, clearMessage, showLandingScore, hideLandingScore } from './hud.js';
 import { preLandingVS } from './physics.js';
 import { playTouchdownSound, playCrashSound } from './audio.js';
-import { triggerLandingShake } from './camera.js';
+import { triggerLandingShake, freezeCamera } from './camera.js';
 import { triggerTireSmoke, triggerDustCloud } from './particles.js';
 import {
   isLandingMode,
@@ -18,9 +18,11 @@ import {
   MAX_LANDING_VS,
   MAX_LANDING_SPEED,
   MS_TO_FPM,
+  MS_TO_KNOTS,
+  RUNWAY_WIDTH,
 } from './constants.js';
 import { getActiveChallenge, getChallengeState, getCrosswindScoreKey, getDailyScoreKey, getEngineOutScoreKey } from './challenges.js';
-import { saveBestScore } from './settings.js';
+import { saveBestScore, getBestScore } from './settings.js';
 
 export const FlightState = {
   GROUNDED: 'GROUNDED',
@@ -148,11 +150,10 @@ export function updateGameState(dt) {
           }
         }
       } else {
-        let quality;
-        if (vsFPM < 100) quality = 'BUTTER! PERFECT LANDING';
-        else if (vsFPM < 300) quality = 'GOOD LANDING';
-        else quality = 'FIRM LANDING';
-        showTimedMessage(quality, 4);
+        // Free-flight landing scoring
+        const score = scoreFreeFlightLanding(vs, state);
+        showLandingScore(score);
+        showTimedMessage(`${score.vs.grade}!`, 5);
       }
     }
     wasAirborne = false;
@@ -183,9 +184,79 @@ function crash(msg) {
   getActiveVehicle().velocity.set(0, 0, 0);
   getActiveVehicle().throttle = 0;
   showMessage(msg);
+
+  // Crash flash overlay
+  const flash = document.getElementById('crash-flash');
+  if (flash) {
+    flash.style.transition = 'none';
+    flash.style.opacity = '0.6';
+    requestAnimationFrame(() => {
+      flash.style.transition = 'opacity 0.5s ease';
+      flash.style.opacity = '0';
+    });
+  }
+
+  // Freeze camera briefly
+  freezeCamera(0.5);
 }
 
 function showTimedMessage(msg, seconds) {
   showMessage(msg);
   messageTimer = seconds;
+}
+
+function scoreFreeFlightLanding(vs, state) {
+  const vsFPM = Math.abs(vs * MS_TO_FPM);
+  const centerlineDev = Math.abs(state.position.x);
+  const gsKts = state.speed * MS_TO_KNOTS;
+
+  // VS rating (50%)
+  let vsScore, vsGrade;
+  if (vsFPM < 60) { vsScore = 100; vsGrade = 'BUTTER'; }
+  else if (vsFPM < 120) { vsScore = 90; vsGrade = 'EXCELLENT'; }
+  else if (vsFPM < 200) { vsScore = 75; vsGrade = 'GOOD'; }
+  else if (vsFPM < 350) { vsScore = 55; vsGrade = 'ACCEPTABLE'; }
+  else if (vsFPM < 500) { vsScore = 30; vsGrade = 'FIRM'; }
+  else { vsScore = 10; vsGrade = 'HARD'; }
+
+  // Centerline bonus (25%)
+  let clScore, clGrade;
+  if (centerlineDev < 5) { clScore = 100; clGrade = 'PERFECT'; }
+  else if (centerlineDev < 15) { clScore = 75; clGrade = 'GOOD'; }
+  else if (centerlineDev < RUNWAY_WIDTH / 2) { clScore = 40; clGrade = 'OK'; }
+  else { clScore = 10; clGrade = 'OFF CENTER'; }
+
+  // Speed rating (25%) - lower is better for landing
+  const refSpeed = (state.config && state.config.takeoffSpeed) || TAKEOFF_SPEED;
+  const refKts = refSpeed * 0.75 * MS_TO_KNOTS; // Vref approx
+  const spdDev = Math.abs(gsKts - refKts);
+  let spdScore;
+  if (spdDev < 5) spdScore = 100;
+  else if (spdDev < 15) spdScore = 75;
+  else if (spdDev < 30) spdScore = 45;
+  else spdScore = 15;
+
+  const overall = Math.round(vsScore * 0.50 + clScore * 0.25 + spdScore * 0.25);
+
+  let overallGrade;
+  if (overall >= 90) overallGrade = 'S';
+  else if (overall >= 80) overallGrade = 'A';
+  else if (overall >= 65) overallGrade = 'B';
+  else if (overall >= 50) overallGrade = 'C';
+  else if (overall >= 35) overallGrade = 'D';
+  else overallGrade = 'F';
+
+  const key = (state.currentType || 'unknown') + '_free';
+  const isNewBest = saveBestScore(key, overall);
+  const best = getBestScore(key);
+
+  return {
+    vs: { score: vsScore, grade: vsGrade, value: Math.round(vsFPM) },
+    centerline: { score: clScore, grade: clGrade, value: centerlineDev.toFixed(1) },
+    touchdownZone: { score: spdScore, grade: spdDev < 15 ? 'ON SPEED' : 'OFF SPEED', value: Math.round(gsKts) },
+    speed: { value: Math.round(gsKts) },
+    overall: { score: overall, grade: overallGrade },
+    newBest: isNewBest,
+    bestScore: best,
+  };
 }

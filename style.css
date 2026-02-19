@@ -19,6 +19,98 @@
   letter-spacing: 0.5px;
 }
 
+/* ─── Loading Screen ─── */
+#loading-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  background: #060a14;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.5s ease;
+}
+
+#loading-screen.fade-out {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.loading-title {
+  font-family: 'Inter', sans-serif;
+  font-size: 48px;
+  font-weight: 700;
+  letter-spacing: 14px;
+  color: rgba(200, 220, 255, 0.9);
+  margin-bottom: 32px;
+}
+
+.loading-bar-container {
+  width: 280px;
+  height: 4px;
+  background: rgba(120, 180, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+
+.loading-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3388ff, #55ccff);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.loading-text {
+  font-family: 'Inter', sans-serif;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 3px;
+  color: rgba(160, 200, 255, 0.4);
+  text-transform: uppercase;
+}
+
+/* ─── Crash Flash ─── */
+.crash-flash {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(200, 30, 20, 0.6);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+/* ─── Contextual Hints ─── */
+.hint-overlay {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 1.5px;
+  color: #e0ecff;
+  background: rgba(8, 12, 20, 0.7);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(120, 180, 255, 0.2);
+  border-radius: 8px;
+  padding: 10px 20px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+  white-space: nowrap;
+}
+
+.hint-overlay.hint-visible {
+  opacity: 1;
+}
+
 body {
   overflow: hidden;
   background: #000;
@@ -807,20 +899,100 @@ body {
   border-radius: 4px;
 }
 
-/* ─── Controls hint ─── */
-#controls-help {
+/* ─── Controls hint (wrapper) ─── */
+#controls-help-wrap {
   position: fixed;
-  bottom: 6px;
+  bottom: 8px;
   left: 50%;
   transform: translateX(-50%);
-  font-family: 'Inter', sans-serif;
-  font-size: 10px;
-  font-weight: 400;
-  letter-spacing: 0.5px;
-  color: rgba(160, 200, 255, 0.2);
-  pointer-events: none;
   z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+}
+
+/* Toggle button — always visible */
+#controls-help-toggle {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: rgba(160, 200, 255, 0.4);
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid rgba(120, 160, 220, 0.15);
+  border-radius: 12px;
+  padding: 3px 14px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.25s ease;
+  user-select: none;
+}
+#controls-help-toggle:hover {
+  color: rgba(180, 215, 255, 0.7);
+  background: rgba(0, 0, 0, 0.45);
+  border-color: rgba(120, 160, 220, 0.3);
+}
+#controls-help-toggle.controls-toggle-active {
+  color: rgba(180, 215, 255, 0.6);
+  background: rgba(0, 0, 0, 0.4);
+  border-color: rgba(120, 160, 220, 0.25);
+}
+
+/* Expanded controls bar */
+#controls-help {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  color: rgba(180, 210, 255, 0.55);
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.35);
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(120, 160, 220, 0.12);
+  backdrop-filter: blur(4px);
+  transition: opacity 0.3s ease, transform 0.3s ease, max-height 0.3s ease;
+  transform-origin: bottom center;
+  pointer-events: none;
+}
+
+/* Collapsed state — hidden */
+#controls-help.controls-collapsed {
+  opacity: 0;
+  transform: translateY(8px) scale(0.95);
+  max-height: 0;
+  padding: 0 14px;
+  overflow: hidden;
+  border-color: transparent;
+}
+
+#controls-help .key {
+  display: inline-block;
+  background: rgba(140, 180, 240, 0.15);
+  border: 1px solid rgba(140, 180, 240, 0.25);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(200, 225, 255, 0.8);
+  margin-right: 2px;
+  line-height: 1.4;
+}
+#controls-help .key-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 2px;
+}
+#controls-help .key-sep {
+  color: rgba(140, 180, 240, 0.2);
+  margin: 0 2px;
+  font-weight: 300;
 }
 
 /* ═══════════════════════════════════════════
@@ -1397,7 +1569,7 @@ body {
 
 @media (pointer: coarse) {
   /* Hide elements that overlap with touch controls */
-  #controls-help { display: none; }
+  #controls-help-wrap { display: none; }
   #minimap-panel { display: none; }
 
   /* Systems panel: hide on mobile — info duplicated by touch buttons */

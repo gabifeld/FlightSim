@@ -9,6 +9,15 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
   </head>
   <body>
+    <!-- Loading Screen -->
+    <div id="loading-screen">
+      <div class="loading-title">FLIGHTSIM</div>
+      <div class="loading-bar-container">
+        <div class="loading-bar-fill" id="loading-bar"></div>
+      </div>
+      <div class="loading-text" id="loading-text">Initializing...</div>
+    </div>
+
     <div id="app"></div>
 
     <!-- Menu System -->
@@ -82,6 +91,15 @@
             </div>
           </div>
           <div class="settings-row">
+            <label class="settings-label">UNLIMITED FUEL</label>
+            <div class="settings-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-fuel" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-row">
             <label class="settings-label">SHOW FPS</label>
             <div class="settings-control">
               <label class="toggle-switch">
@@ -112,6 +130,7 @@
             <div class="controls-row"><span class="key-badge">F</span> <span class="controls-desc">Flaps</span></div>
             <div class="controls-row"><span class="key-badge">B</span> <span class="controls-desc">Speedbrake</span></div>
             <div class="controls-row"><span class="key-badge">L</span> <span class="controls-desc">Landing lights</span></div>
+            <div class="controls-row"><span class="key-badge">U</span> <span class="controls-desc">Unlimited fuel</span></div>
             <div class="controls-row"><span class="key-badge">V</span> <span class="controls-desc">Camera mode</span></div>
             <div class="controls-row"><span class="key-badge">R</span> <span class="controls-desc">Reset</span></div>
             <div class="controls-row"><span class="key-badge">I</span> <span class="controls-desc">Toggle ILS</span></div>
@@ -221,6 +240,10 @@
         <div class="sys-row">
           <span class="sys-label">LIGHT</span>
           <span class="sys-status" id="hud-lights">OFF</span>
+        </div>
+        <div class="sys-row">
+          <span class="sys-label">FUEL</span>
+          <span class="sys-status" id="hud-fuel">UNLIMITED</span>
         </div>
         <div class="sys-row">
           <span class="sys-label">WIND</span>
@@ -360,6 +383,9 @@
       <div class="select-title">START POSITION - AIRPORT 2</div>
       <div class="spawn-option" data-spawn="runway_apt2">Runway (Airport 2)</div>
       <div class="spawn-option" data-spawn="gate_apt2">Gate (Airport 2)</div>
+      <div class="select-title">START POSITION - INTERNATIONAL</div>
+      <div class="spawn-option" data-spawn="runway_intl">Runway 09L (International)</div>
+      <div class="spawn-option" data-spawn="gate_intl">Gate (International)</div>
       <div class="select-divider"></div>
       <div class="select-title">LANDING CHALLENGE</div>
       <div class="spawn-option" data-spawn="short_final">Short Final (1.5nm / 500ft)</div>
@@ -385,13 +411,58 @@
       <div class="start-btn" id="start-btn">START</div>
     </div>
 
+    <!-- Crash Flash Overlay -->
+    <div id="crash-flash" class="crash-flash"></div>
+
+    <!-- Contextual Hint Overlay -->
+    <div id="hint-overlay" class="hint-overlay"></div>
+
     <!-- FPS overlay -->
     <div id="perf-overlay" style="display:none;"></div>
 
-    <!-- Controls hint -->
-    <div id="controls-help">
-      W/S Pitch &middot; A/D Roll &middot; Q/E Yaw &middot; Shift/Ctrl Throttle &middot; Space Brake &middot; G Gear &middot; F Flaps &middot; B Speedbrake &middot; V Camera &middot; R Reset &middot; 1-4 Aircraft &middot; L Lights &middot; [/] Time &middot; T Auto-Time &middot; P Weather &middot; Z AP &middot; = Replay &middot; I ILS &middot; K Land Assist
+    <!-- Controls hint (collapsed by default, click to expand) -->
+    <div id="controls-help-wrap">
+      <div id="controls-help-toggle">? CONTROLS</div>
+      <div id="controls-help" class="controls-collapsed">
+        <span class="key-group"><span class="key">W</span><span class="key">S</span> Pitch</span>
+        <span class="key-group"><span class="key">A</span><span class="key">D</span> Roll</span>
+        <span class="key-group"><span class="key">Q</span><span class="key">E</span> Yaw</span>
+        <span class="key-group"><span class="key">Shift</span><span class="key">Ctrl</span> Throttle</span>
+        <span class="key-group"><span class="key">Space</span> Brake</span>
+        <span class="key-sep">|</span>
+        <span class="key-group"><span class="key">G</span> Gear</span>
+        <span class="key-group"><span class="key">F</span> Flaps</span>
+        <span class="key-group"><span class="key">B</span> Spoiler</span>
+        <span class="key-group"><span class="key">L</span> Lights</span>
+        <span class="key-sep">|</span>
+        <span class="key-group"><span class="key">V</span> Camera</span>
+        <span class="key-group"><span class="key">R</span> Reset</span>
+        <span class="key-group"><span class="key">1</span>-<span class="key">5</span> Aircraft</span>
+        <span class="key-group"><span class="key">U</span> Fuel</span>
+        <span class="key-sep">|</span>
+        <span class="key-group"><span class="key">Z</span> AP</span>
+        <span class="key-group"><span class="key">I</span> ILS</span>
+        <span class="key-group"><span class="key">K</span> Assist</span>
+        <span class="key-sep">|</span>
+        <span class="key-group"><span class="key">[</span><span class="key">]</span> Time</span>
+        <span class="key-group"><span class="key">P</span> Weather</span>
+        <span class="key-group"><span class="key">=</span> Replay</span>
+      </div>
     </div>
+    <script>
+      function toggleControlsHelp() {
+        const bar = document.getElementById('controls-help');
+        const btn = document.getElementById('controls-help-toggle');
+        bar.classList.toggle('controls-collapsed');
+        btn.classList.toggle('controls-toggle-active');
+      }
+      document.getElementById('controls-help-toggle').addEventListener('click', toggleControlsHelp);
+      document.addEventListener('keydown', function(e) {
+        if (e.key === '?' || (e.shiftKey && e.code === 'Slash')) {
+          toggleControlsHelp();
+        }
+      });
+    </script>
 
     <script type="module" src="/src/main.js"></script>
   </body>

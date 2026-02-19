@@ -47,6 +47,7 @@ export function initMenu() {
     todSlider: document.getElementById('setting-tod'),
     todValue: document.getElementById('setting-tod-value'),
     gpwsToggle: document.getElementById('setting-gpws'),
+    fuelToggle: document.getElementById('setting-fuel'),
     // Graphics + FPS
     graphicsSelect: document.getElementById('setting-graphics'),
     fpsToggle: document.getElementById('setting-fps'),
@@ -67,12 +68,12 @@ export function initMenu() {
 
   onTap(els.btnMainSettings, () => {
     returnTo = 'main';
-    showPanel('settings');
+    transitionTo('settings');
   });
 
   onTap(els.btnMainControls, () => {
     returnTo = 'main';
-    showPanel('controls');
+    transitionTo('controls');
   });
 
   // Pause menu buttons
@@ -80,12 +81,12 @@ export function initMenu() {
 
   onTap(els.btnPauseSettings, () => {
     returnTo = 'pause';
-    showPanel('settings');
+    transitionTo('settings');
   });
 
   onTap(els.btnPauseControls, () => {
     returnTo = 'pause';
-    showPanel('controls');
+    transitionTo('controls');
   });
 
   onTap(els.btnReset, () => {
@@ -96,7 +97,7 @@ export function initMenu() {
   onTap(els.btnMainMenuReturn, () => {
     paused = false;
     if (onMainMenuCallback) onMainMenuCallback();
-    showPanel('main');
+    transitionTo('main');
   });
 
   // Settings controls
@@ -129,6 +130,13 @@ export function initMenu() {
     });
   }
 
+  if (els.fuelToggle) {
+    els.fuelToggle.checked = getSetting('unlimitedFuel');
+    els.fuelToggle.addEventListener('change', () => {
+      setSetting('unlimitedFuel', els.fuelToggle.checked);
+    });
+  }
+
   if (els.graphicsSelect) {
     els.graphicsSelect.value = getSetting('graphicsQuality');
     els.graphicsSelect.addEventListener('change', () => {
@@ -149,11 +157,11 @@ export function initMenu() {
 
   // Back buttons
   onTap(els.btnSettingsBack, () => {
-    showPanel(returnTo || 'main');
+    transitionTo(returnTo || 'main');
   });
 
   onTap(els.btnControlsBack, () => {
-    showPanel(returnTo || 'main');
+    transitionTo(returnTo || 'main');
   });
 
   // Show main menu on load
@@ -182,6 +190,15 @@ function hideAllPanels() {
   if (els.controlsPanel) els.controlsPanel.classList.add('hidden');
 }
 
+function transitionTo(name) {
+  if (!els.overlay) { showPanel(name); return; }
+  els.overlay.style.opacity = '0';
+  setTimeout(() => {
+    showPanel(name);
+    els.overlay.style.opacity = '1';
+  }, 200);
+}
+
 function showPanel(name) {
   hideAllPanels();
   activePanel = name;
@@ -201,6 +218,10 @@ function showPanel(name) {
       if (els.todSlider) {
         els.todSlider.value = getTimeOfDay();
         updateTodLabel();
+      }
+      // Sync fuel toggle (may have been changed via U key)
+      if (els.fuelToggle) {
+        els.fuelToggle.checked = getSetting('unlimitedFuel');
       }
       break;
     case 'controls':
