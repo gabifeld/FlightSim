@@ -14,9 +14,12 @@ let sky;
 let lensflare;
 const sunPosition = new THREE.Vector3();
 const sunDirection = new THREE.Vector3();
+const _fogColor = new THREE.Color();
 
 // Environment map for PBR reflections
 let envMapRT = null;
+let pmremGenerator = null;
+let lastEnvMapSunElevation = null;
 
 // Time of day system
 let timeOfDay = DEFAULT_TIME_OF_DAY; // 0-24 hours
@@ -27,7 +30,6 @@ let starField = null;
 
 // Moon
 let moonMesh = null;
-let moonLight = null;
 
 const SHADOW_QUALITY_PRESETS = Object.freeze({
   low: Object.freeze({
@@ -135,16 +137,23 @@ function createSky() {
 // NOT applied to scene.environment (would wash out terrain colors)
 export function generateEnvironmentMap() {
   if (!renderer || !sky) return;
+
+  // Throttle: skip if sun elevation hasn't changed by more than 5 degrees
+  const currentSunElev = (timeOfDay >= 6 && timeOfDay <= 18)
+    ? 90 * Math.sin(Math.PI * (timeOfDay - 6) / 12)
+    : -10;
+  if (lastEnvMapSunElevation !== null && Math.abs(currentSunElev - lastEnvMapSunElevation) < 5) return;
+  lastEnvMapSunElevation = currentSunElev;
+
   const skyScene = new THREE.Scene();
   const skyCopy = sky.clone();
   skyCopy.material = sky.material;
   skyScene.add(skyCopy);
 
-  const pmrem = new THREE.PMREMGenerator(renderer);
+  if (!pmremGenerator) pmremGenerator = new THREE.PMREMGenerator(renderer);
   if (envMapRT) envMapRT.dispose();
-  envMapRT = pmrem.fromScene(skyScene, 0, 0.1, TERRAIN_SIZE * 1.6);
+  envMapRT = pmremGenerator.fromScene(skyScene, 0, 0.1, TERRAIN_SIZE * 1.6);
   // Do NOT set scene.environment — only aircraft materials use this via getEnvironmentMap()
-  pmrem.dispose();
   skyScene.remove(skyCopy);
 }
 
@@ -278,10 +287,6 @@ function createMoon() {
   moonMesh = new THREE.Mesh(moonGeo, moonMat);
   moonMesh.visible = false;
   scene.add(moonMesh);
-
-  moonLight = new THREE.PointLight(0x8899bb, 0, 5000);
-  moonLight.visible = false;
-  scene.add(moonLight);
 }
 
 // Time of day system
@@ -338,9 +343,9 @@ function updateTimeOfDayLighting() {
   // Sun intensity
   sun.intensity = lerp(0.0, 3.5, dayFactor);
 
-  // Ambient light
+  // Ambient light (boosted at night to compensate for removed PointLights)
   if (ambientLight) {
-    ambientLight.intensity = lerp(0.08, 1.0, duskFactor);
+    ambientLight.intensity = lerp(0.25, 1.0, duskFactor);
     if (duskFactor < 0.3) {
       ambientLight.color.setHex(0x112244); // blue tint at night
     } else {
@@ -348,25 +353,30 @@ function updateTimeOfDayLighting() {
     }
   }
 
-  // Hemisphere light
+  // Hemisphere light (blue sky tint at night)
   if (hemiLight) {
     hemiLight.intensity = lerp(0.15, 0.8, duskFactor);
+    if (duskFactor < 0.3) {
+      hemiLight.color.setHex(0x1a2a4a); // blue tint at night
+    } else {
+      hemiLight.color.setHex(0xc0d8f0);
+    }
   }
 
   // Fog color (weather system controls density via weatherFx.js)
   if (scene.fog) {
-    const fogColor = new THREE.Color();
+    _fogColor.setHex(0x000000);
     if (sunElevation > 10) {
-      fogColor.setHSL(0.57, 0.35, 0.76);
+      _fogColor.setHSL(0.57, 0.35, 0.76);
     } else if (sunElevation > 0) {
       // Sunset/sunrise: warm orange
       const t = sunElevation / 10;
-      fogColor.setHSL(0.08 + t * 0.49, 0.65, 0.3 + t * 0.42);
+      _fogColor.setHSL(0.08 + t * 0.49, 0.65, 0.3 + t * 0.42);
     } else {
-      fogColor.setHSL(0.62, 0.3, 0.08);
+      _fogColor.setHSL(0.62, 0.3, 0.08);
     }
-    scene.fog.color.copy(fogColor);
-    renderer.setClearColor(fogColor);
+    scene.fog.color.copy(_fogColor);
+    renderer.setClearColor(_fogColor);
   }
 
   // Tone mapping exposure
@@ -380,10 +390,9 @@ function updateTimeOfDayLighting() {
   }
 
   // Moon
-  if (moonMesh && moonLight) {
+  if (moonMesh) {
     const moonVisible = sunElevation < 5;
     moonMesh.visible = moonVisible;
-    moonLight.visible = moonVisible;
 
     if (moonVisible) {
       // Moon opposite sun
@@ -395,8 +404,6 @@ function updateTimeOfDayLighting() {
         Math.sin(THREE.MathUtils.degToRad(moonElev)) * moonDist,
         Math.cos(moonAzRad) * Math.cos(THREE.MathUtils.degToRad(moonElev)) * moonDist
       );
-      moonLight.position.copy(moonMesh.position);
-      moonLight.intensity = clamp(1 - sunElevation / 5, 0, 0.2);
     }
   }
 

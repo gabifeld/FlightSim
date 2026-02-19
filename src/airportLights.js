@@ -1,9 +1,7 @@
-// Night runway/taxiway lighting with InstancedMesh + light pooling + Points glow
+// Night runway/taxiway lighting with InstancedMesh + Points glow (no PointLights)
 import * as THREE from 'three';
 import { RUNWAY_LENGTH, RUNWAY_WIDTH, AIRPORT2_X, AIRPORT2_Z } from './constants.js';
-import { getActiveVehicle } from './vehicleState.js';
 
-let lightPool = [];          // Reusable PointLights
 let fixturePositions = [];   // All light fixture positions
 let edgeInstanced = null;    // Runway edge InstancedMesh
 let threshGreenInstanced = null;
@@ -16,15 +14,9 @@ let sceneRef = null;
 
 // Points-based glow system (cheap, visible from far away)
 let glowPoints = null;       // THREE.Points for far-away visibility
+let haloPoints = null;       // Larger softer halo layer
 
-const POOL_SIZE = 12;        // Reduced from 32 — PointLights are expensive
 const EDGE_SPACING = 60;
-
-// Cached sort state - avoid sorting every frame
-let sortedCache = null;
-let lastSortX = 0;
-let lastSortZ = 0;
-let sortFrameCounter = 0;
 
 function createLightFixtureMaterial(color, emissive) {
   return new THREE.MeshStandardMaterial({
@@ -198,7 +190,7 @@ function buildGlowPoints(scene) {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
   const mat = new THREE.PointsMaterial({
-    size: 8,
+    size: 12,
     sizeAttenuation: true,
     vertexColors: true,
     transparent: true,
@@ -211,6 +203,26 @@ function buildGlowPoints(scene) {
   glowPoints.frustumCulled = false;
   glowPoints.visible = false;
   scene.add(glowPoints);
+
+  // Halo layer — larger, softer glow for ambient light feel
+  const haloGeo = new THREE.BufferGeometry();
+  haloGeo.setAttribute('position', new THREE.BufferAttribute(positions.slice(), 3));
+  haloGeo.setAttribute('color', new THREE.BufferAttribute(colors.slice(), 3));
+
+  const haloMat = new THREE.PointsMaterial({
+    size: 24,
+    sizeAttenuation: true,
+    vertexColors: true,
+    transparent: true,
+    opacity: 0.3,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+
+  haloPoints = new THREE.Points(haloGeo, haloMat);
+  haloPoints.frustumCulled = false;
+  haloPoints.visible = false;
+  scene.add(haloPoints);
 }
 
 export function initAirportLights(scene) {
@@ -227,14 +239,6 @@ export function initAirportLights(scene) {
 
   // Build glow sprite system from all fixtures
   buildGlowPoints(scene);
-
-  // --- Light pool (reusable PointLights) — reduced pool for performance ---
-  for (let i = 0; i < POOL_SIZE; i++) {
-    const light = new THREE.PointLight(0xffeedd, 0, 120);
-    light.visible = false;
-    scene.add(light);
-    lightPool.push(light);
-  }
 }
 
 export function setNightMode(isNight) {
@@ -246,8 +250,9 @@ export function updateAirportLights(dt) {
 
   const time = performance.now() * 0.001;
 
-  // Toggle glow points visibility
+  // Toggle glow + halo points visibility
   if (glowPoints) glowPoints.visible = nightMode;
+  if (haloPoints) haloPoints.visible = nightMode;
 
   // ALS rabbit strobe animation (sequenced flash far->near)
   if (nightMode) {
@@ -266,7 +271,7 @@ export function updateAirportLights(dt) {
     }
   }
 
-  // Update emissive intensity based on night mode
+  // Update emissive intensity based on night mode (boosted for no-PointLight compensation)
   const emissiveMul = nightMode ? 5.0 : 0.3;
   if (edgeInstanced) edgeInstanced.material.emissiveIntensity = emissiveMul;
   if (threshGreenInstanced) threshGreenInstanced.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
@@ -276,58 +281,5 @@ export function updateAirportLights(dt) {
   // PAPI lights emissive update
   for (const papi of papiLights) {
     papi.mesh.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
-  }
-
-  // Pool PointLights: position on nearest fixtures to aircraft
-  if (nightMode) {
-    const ax = getActiveVehicle().position.x;
-    const az = getActiveVehicle().position.z;
-
-    // Only re-sort when aircraft moves significantly or every 30 frames
-    sortFrameCounter++;
-    const dx = ax - lastSortX;
-    const dz = az - lastSortZ;
-    if (!sortedCache || sortFrameCounter >= 30 || dx * dx + dz * dz > 900) {
-      sortFrameCounter = 0;
-      lastSortX = ax;
-      lastSortZ = az;
-
-      // Filter nearby fixtures then partial sort
-      const maxDistSq = 500 * 500; // Reduced search radius — PointLights only for nearby ground glow
-      const candidates = [];
-      for (let i = 0; i < fixturePositions.length; i++) {
-        const f = fixturePositions[i];
-        const distSq = (f.x - ax) * (f.x - ax) + (f.z - az) * (f.z - az);
-        if (distSq < maxDistSq) {
-          candidates.push({ idx: i, dist: distSq });
-        }
-      }
-      candidates.sort((a, b) => a.dist - b.dist);
-      sortedCache = candidates.slice(0, POOL_SIZE);
-    }
-
-    for (let i = 0; i < POOL_SIZE; i++) {
-      const light = lightPool[i];
-      if (i < sortedCache.length) {
-        const f = fixturePositions[sortedCache[i].idx];
-        light.position.set(f.x, f.y + 1, f.z);
-        light.visible = true;
-        light.intensity = 5;
-        light.distance = 120;
-
-        // Color based on type
-        if (f.type === 'threshold_green') light.color.setHex(0x00ff44);
-        else if (f.type === 'threshold_red') light.color.setHex(0xff2200);
-        else if (f.type === 'taxi_blue') light.color.setHex(0x2244ff);
-        else if (f.type === 'papi') light.color.setHex(0xff0000);
-        else light.color.setHex(0xffeedd);
-      } else {
-        light.visible = false;
-      }
-    }
-  } else {
-    for (const light of lightPool) {
-      light.visible = false;
-    }
   }
 }
