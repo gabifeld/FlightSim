@@ -1417,102 +1417,59 @@ let cloudSceneRef = null;
 let cloudQuality = 'high';
 let weatherCloudProfile = { cloudCount: 180, cloudOpacity: 0.28 };
 let cloudPuffTexture = null;
-let cloudWispTexture = null;
 let cloudCumulusMats = [];
-let cloudCirrusMats = [];
 let cloudShadowMats = [];
 
 const CLOUD_QUALITY_CONFIG = {
   low: {
     cumulusCount: 90,
-    cirrusCount: 30,
-    cumulusPuffMin: 10,
-    cumulusPuffMax: 15,
-    cirrusWispMin: 3,
-    cirrusWispMax: 5,
     area: 50000,
-    puffScale: 1.6,
   },
   medium: {
     cumulusCount: 190,
-    cirrusCount: 60,
-    cumulusPuffMin: 12,
-    cumulusPuffMax: 18,
-    cirrusWispMin: 4,
-    cirrusWispMax: 6,
     area: 52000,
-    puffScale: 1.3,
   },
   high: {
     cumulusCount: 320,
-    cirrusCount: 80,
-    cumulusPuffMin: 14,
-    cumulusPuffMax: 22,
-    cirrusWispMin: 5,
-    cirrusWispMax: 8,
     area: 56000,
-    puffScale: 1.0,
   },
 };
 const CLOUD_DENSITY_ORDER = ['none', 'few', 'normal', 'many'];
 const CLOUD_DENSITY_MULTIPLIER = { none: 0, few: 0.5, normal: 0.9, many: 1.18 };
 
-// Create soft, organic cloud puff texture with multiple overlapping gradients
+// Soft cotton-ball cloud puff texture (128px for stylized cartoon look)
 function createCloudTexture() {
-  const size = 256;
+  const size = 128;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   const mid = size / 2;
 
-  // Layer 1: large soft base
+  // Soft radial gradient with very gentle edges
   const g1 = ctx.createRadialGradient(mid, mid, 0, mid, mid, mid);
   g1.addColorStop(0, 'rgba(255,255,255,1.0)');
-  g1.addColorStop(0.25, 'rgba(255,255,255,0.9)');
-  g1.addColorStop(0.5, 'rgba(255,255,255,0.5)');
-  g1.addColorStop(0.75, 'rgba(255,255,255,0.15)');
+  g1.addColorStop(0.2, 'rgba(255,255,255,0.95)');
+  g1.addColorStop(0.4, 'rgba(255,255,255,0.7)');
+  g1.addColorStop(0.6, 'rgba(255,255,255,0.35)');
+  g1.addColorStop(0.8, 'rgba(255,255,255,0.1)');
   g1.addColorStop(1, 'rgba(255,255,255,0)');
   ctx.fillStyle = g1;
   ctx.fillRect(0, 0, size, size);
 
-  // Layer 2: off-center lumps for organic shape
+  // Off-center lumps for organic cotton-ball shape
   const offsets = [
-    { x: mid * 0.7, y: mid * 0.8, r: mid * 0.6 },
-    { x: mid * 1.3, y: mid * 0.9, r: mid * 0.55 },
-    { x: mid * 0.9, y: mid * 1.2, r: mid * 0.5 },
+    { x: mid * 0.7, y: mid * 0.85, r: mid * 0.55 },
+    { x: mid * 1.25, y: mid * 0.9, r: mid * 0.5 },
   ];
   for (const o of offsets) {
     const g = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
-    g.addColorStop(0, 'rgba(255,255,255,0.5)');
-    g.addColorStop(0.5, 'rgba(255,255,255,0.2)');
+    g.addColorStop(0, 'rgba(255,255,255,0.4)');
+    g.addColorStop(0.5, 'rgba(255,255,255,0.15)');
     g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
   }
-
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-}
-
-// Create a wispy/cirrus cloud texture
-function createWispTexture() {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const mid = size / 2;
-
-  // Elongated horizontal wisp
-  const g = ctx.createRadialGradient(mid, mid, 0, mid, mid, mid);
-  g.addColorStop(0, 'rgba(255,255,255,0.7)');
-  g.addColorStop(0.3, 'rgba(255,255,255,0.4)');
-  g.addColorStop(0.6, 'rgba(255,255,255,0.1)');
-  g.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, size, size);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
@@ -1533,17 +1490,14 @@ export function createClouds(scene) {
   cloudClusters = [];
   cloudMaterials = [];
   cloudCumulusMats = [];
-  cloudCirrusMats = [];
   cloudShadowMats = [];
 
   if (!cloudPuffTexture) cloudPuffTexture = createCloudTexture();
-  if (!cloudWispTexture) cloudWispTexture = createWispTexture();
   const quality = CLOUD_QUALITY_CONFIG[cloudQuality] || CLOUD_QUALITY_CONFIG.high;
   const opacityBase = Math.max(0.16, Math.min(0.96, weatherCloudProfile.cloudOpacity || 0.28));
 
-  const cumulusOpacities = [0.45, 0.55, 0.65, 0.75, 0.85];
-  const cirrusOpacities = [0.24, 0.32, 0.42];
-  const shadowOpacities = [0.12, 0.18, 0.24];
+  const cumulusOpacities = [0.55, 0.65, 0.75, 0.85];
+  const shadowOpacities = [0.15, 0.22];
 
   for (let i = 0; i < cumulusOpacities.length; i++) {
     const mat = new THREE.SpriteMaterial({
@@ -1552,24 +1506,10 @@ export function createClouds(scene) {
       opacity: Math.min(0.98, cumulusOpacities[i] * (0.7 + opacityBase * 0.95)),
       depthWrite: false,
       fog: false,
-      color: 0xf0f3fa,
+      color: 0xffffff,
     });
     mat.userData.role = 'cumulus';
     cloudCumulusMats.push(mat);
-    cloudMaterials.push(mat);
-  }
-
-  for (let i = 0; i < cirrusOpacities.length; i++) {
-    const mat = new THREE.SpriteMaterial({
-      map: cloudWispTexture,
-      transparent: true,
-      opacity: Math.min(0.92, cirrusOpacities[i] * (0.72 + opacityBase * 0.92)),
-      depthWrite: false,
-      fog: false,
-      color: 0xdce4f2,
-    });
-    mat.userData.role = 'cirrus';
-    cloudCirrusMats.push(mat);
     cloudMaterials.push(mat);
   }
 
@@ -1580,7 +1520,7 @@ export function createClouds(scene) {
       opacity: Math.min(0.4, shadowOpacities[i] * (0.65 + opacityBase * 0.8)),
       depthWrite: false,
       fog: false,
-      color: 0x7f8594,
+      color: 0xcccccc,
     });
     mat.userData.role = 'shadow';
     cloudShadowMats.push(mat);
@@ -1588,10 +1528,10 @@ export function createClouds(scene) {
   }
 
   const area = quality.area;
-  const puffScale = quality.puffScale || 1.0;
+  const totalCount = quality.cumulusCount;
 
-  // Cumulus clusters
-  for (let c = 0; c < quality.cumulusCount; c++) {
+  // Cumulus-only clusters: 3-5 large puffs each, flat cartoon look
+  for (let c = 0; c < totalCount; c++) {
     const cluster = new THREE.Group();
     cluster.position.set(
       (Math.random() - 0.5) * area,
@@ -1601,70 +1541,36 @@ export function createClouds(scene) {
     cluster.userData.type = 'cumulus';
     cluster.userData.drift = 0.8 + Math.random() * 0.5;
 
-    const cloudW = 340 + Math.random() * 680;
-    const cloudD = 240 + Math.random() * 460;
-    const cloudH = 46 + Math.random() * 110;
-    const puffCount = quality.cumulusPuffMin + Math.floor(Math.random() * (quality.cumulusPuffMax - quality.cumulusPuffMin + 1));
+    const cloudW = 500 + Math.random() * 600;
+    const cloudD = 400 + Math.random() * 400;
+    const cloudH = 30 + Math.random() * 40; // flatter arrangement
+    const puffCount = 3 + Math.floor(Math.random() * 3); // 3-5 puffs
 
     for (let p = 0; p < puffCount; p++) {
-      const isCore = p < puffCount * 0.42;
-      const mat = isCore
-        ? cloudCumulusMats[2 + Math.floor(Math.random() * 3)]
-        : cloudCumulusMats[Math.floor(Math.random() * 3)];
+      const mat = cloudCumulusMats[Math.floor(Math.random() * cloudCumulusMats.length)];
       const sprite = new THREE.Sprite(mat);
-      const s = (isCore
-        ? (240 + Math.random() * 320)
-        : (150 + Math.random() * 230)) * puffScale;
-      sprite.scale.set(s, s * (0.42 + Math.random() * 0.26), 1);
-      const spread = isCore ? 0.38 : 1.0;
+      // 2-3x scale for big puffy cartoon look
+      const s = 400 + Math.random() * 500;
+      sprite.scale.set(s, s * (0.45 + Math.random() * 0.2), 1);
       sprite.position.set(
-        (Math.random() - 0.5) * cloudW * spread,
-        (Math.random() - 0.5) * cloudH + (isCore ? cloudH * 0.12 : 0),
-        (Math.random() - 0.5) * cloudD * spread
+        (Math.random() - 0.5) * cloudW,
+        (Math.random() - 0.5) * cloudH,
+        (Math.random() - 0.5) * cloudD
       );
       cluster.add(sprite);
     }
 
-    // Underside shading puffs
-    const shadeCount = 4 + Math.floor(Math.random() * 4);
+    // Underside shadow puff (1-2 per cluster)
+    const shadeCount = 1 + Math.floor(Math.random() * 2);
     for (let s = 0; s < shadeCount; s++) {
       const mat = cloudShadowMats[Math.floor(Math.random() * cloudShadowMats.length)];
       const sprite = new THREE.Sprite(mat);
-      const sz = (170 + Math.random() * 230) * puffScale;
-      sprite.scale.set(sz, sz * 0.28, 1);
+      const sz = 350 + Math.random() * 300;
+      sprite.scale.set(sz, sz * 0.3, 1);
       sprite.position.set(
-        (Math.random() - 0.5) * cloudW * 0.65,
-        -cloudH * 0.55 - Math.random() * 18,
-        (Math.random() - 0.5) * cloudD * 0.65
-      );
-      cluster.add(sprite);
-    }
-
-    cloudGroup.add(cluster);
-    cloudClusters.push(cluster);
-  }
-
-  // Cirrus clusters
-  for (let c = 0; c < quality.cirrusCount; c++) {
-    const cluster = new THREE.Group();
-    cluster.position.set(
-      (Math.random() - 0.5) * (area * 1.08),
-      1700 + Math.random() * 1500,
-      (Math.random() - 0.5) * (area * 1.08)
-    );
-    cluster.userData.type = 'cirrus';
-    cluster.userData.drift = 1.35 + Math.random() * 0.85;
-
-    const wispCount = quality.cirrusWispMin + Math.floor(Math.random() * (quality.cirrusWispMax - quality.cirrusWispMin + 1));
-    for (let w = 0; w < wispCount; w++) {
-      const mat = cloudCirrusMats[Math.floor(Math.random() * cloudCirrusMats.length)];
-      const sprite = new THREE.Sprite(mat);
-      const sw = (520 + Math.random() * 760) * puffScale;
-      sprite.scale.set(sw, sw * (0.07 + Math.random() * 0.04), 1);
-      sprite.position.set(
-        (Math.random() - 0.5) * 700,
-        (Math.random() - 0.5) * 26,
-        (Math.random() - 0.5) * 420
+        (Math.random() - 0.5) * cloudW * 0.5,
+        -cloudH * 0.6 - Math.random() * 10,
+        (Math.random() - 0.5) * cloudD * 0.5
       );
       cluster.add(sprite);
     }
@@ -1708,48 +1614,60 @@ export function updateClouds(dt, windVector, cameraY, focusX = 0, focusZ = 0) {
   }
 }
 
+// Cloud color palettes for direct assignment
+const CLOUD_PALETTES = {
+  day:   { base: new THREE.Color(0xffffff), shadow: new THREE.Color(0xcccccc) },
+  dawn:  { base: new THREE.Color(0xffccaa), shadow: new THREE.Color(0xcc8866) },
+  dusk:  { base: new THREE.Color(0xff9966), shadow: new THREE.Color(0x996644) },
+  night: { base: new THREE.Color(0x334455), shadow: new THREE.Color(0x222233) },
+};
+
+const _cloudBaseColor = new THREE.Color();
+const _cloudShadowColor = new THREE.Color();
+
 // Update cloud colors based on time of day
 export function updateCloudColors(sunElevation) {
-  const cumulusColor = new THREE.Color();
-  const cirrusColor = new THREE.Color();
-  const shadowColor = new THREE.Color();
+  let baseColor, shadowColor;
 
   if (sunElevation > 15) {
-    // Daytime
-    cumulusColor.setHex(0xf0f3fa);
-    cirrusColor.setHex(0xdde4f2);
-    shadowColor.setHex(0x7f8593);
-  } else if (sunElevation > 0) {
-    // Sunset/sunrise
-    const t = sunElevation / 15;
-    cumulusColor.setRGB(1.0, 0.78 + t * 0.18, 0.62 + t * 0.3);
-    cirrusColor.setRGB(0.92, 0.72 + t * 0.2, 0.68 + t * 0.2);
-    shadowColor.setRGB(0.56, 0.47 + t * 0.16, 0.44 + t * 0.2);
+    baseColor = CLOUD_PALETTES.day.base;
+    shadowColor = CLOUD_PALETTES.day.shadow;
+  } else if (sunElevation > 2) {
+    const t = (sunElevation - 2) / 13;
+    _cloudBaseColor.copy(CLOUD_PALETTES.dawn.base).lerp(CLOUD_PALETTES.day.base, t);
+    _cloudShadowColor.copy(CLOUD_PALETTES.dawn.shadow).lerp(CLOUD_PALETTES.day.shadow, t);
+    baseColor = _cloudBaseColor;
+    shadowColor = _cloudShadowColor;
+  } else if (sunElevation > -2) {
+    const t = (sunElevation + 2) / 4;
+    _cloudBaseColor.copy(CLOUD_PALETTES.dusk.base).lerp(CLOUD_PALETTES.dawn.base, t);
+    _cloudShadowColor.copy(CLOUD_PALETTES.dusk.shadow).lerp(CLOUD_PALETTES.dawn.shadow, t);
+    baseColor = _cloudBaseColor;
+    shadowColor = _cloudShadowColor;
   } else if (sunElevation > -5) {
-    // Twilight
-    const t = (sunElevation + 5) / 5;
-    cumulusColor.setRGB(0.55 + t * 0.34, 0.43 + t * 0.28, 0.66 + t * 0.16);
-    cirrusColor.setRGB(0.44 + t * 0.3, 0.4 + t * 0.24, 0.66 + t * 0.12);
-    shadowColor.setRGB(0.32 + t * 0.2, 0.3 + t * 0.2, 0.42 + t * 0.14);
+    const t = (sunElevation + 5) / 3;
+    _cloudBaseColor.copy(CLOUD_PALETTES.night.base).lerp(CLOUD_PALETTES.dusk.base, t);
+    _cloudShadowColor.copy(CLOUD_PALETTES.night.shadow).lerp(CLOUD_PALETTES.dusk.shadow, t);
+    baseColor = _cloudBaseColor;
+    shadowColor = _cloudShadowColor;
   } else {
-    // Night
-    cumulusColor.setRGB(0.2, 0.21, 0.28);
-    cirrusColor.setRGB(0.17, 0.19, 0.26);
-    shadowColor.setRGB(0.13, 0.14, 0.18);
+    baseColor = CLOUD_PALETTES.night.base;
+    shadowColor = CLOUD_PALETTES.night.shadow;
   }
 
   for (let i = 0; i < cloudMaterials.length; i++) {
     const mat = cloudMaterials[i];
-    const role = mat.userData.role;
-    if (role === 'cumulus') mat.color.copy(cumulusColor);
-    else if (role === 'cirrus') mat.color.copy(cirrusColor);
-    else mat.color.copy(shadowColor);
+    if (mat.userData.role === 'shadow') {
+      mat.color.copy(shadowColor);
+    } else {
+      mat.color.copy(baseColor);
+    }
   }
 }
 
 function getCloudActiveLimit() {
   const quality = CLOUD_QUALITY_CONFIG[cloudQuality] || CLOUD_QUALITY_CONFIG.high;
-  const baseCount = quality.cumulusCount + quality.cirrusCount;
+  const baseCount = quality.cumulusCount;
   const weatherFactor = Math.max(0.45, Math.min(2.0, (weatherCloudProfile.cloudCount || 180) / 180));
   const densityFactor = CLOUD_DENSITY_MULTIPLIER[cloudDensity] ?? 1.0;
   return Math.floor(baseCount * weatherFactor * densityFactor);
@@ -1790,17 +1708,12 @@ export function applyWeatherCloudProfile(profile) {
   const opacityBase = Math.max(0.16, Math.min(0.96, weatherCloudProfile.cloudOpacity || 0.28));
   for (let i = 0; i < cloudCumulusMats.length; i++) {
     const mat = cloudCumulusMats[i];
-    const base = [0.45, 0.55, 0.65, 0.75, 0.85][i] || 0.65;
+    const base = [0.55, 0.65, 0.75, 0.85][i] || 0.65;
     mat.opacity = Math.min(0.98, base * (0.7 + opacityBase * 0.95));
-  }
-  for (let i = 0; i < cloudCirrusMats.length; i++) {
-    const mat = cloudCirrusMats[i];
-    const base = [0.24, 0.32, 0.42][i] || 0.3;
-    mat.opacity = Math.min(0.92, base * (0.72 + opacityBase * 0.92));
   }
   for (let i = 0; i < cloudShadowMats.length; i++) {
     const mat = cloudShadowMats[i];
-    const base = [0.12, 0.18, 0.24][i] || 0.18;
+    const base = [0.15, 0.22][i] || 0.18;
     mat.opacity = Math.min(0.4, base * (0.65 + opacityBase * 0.8));
   }
 
