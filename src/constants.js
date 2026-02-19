@@ -87,7 +87,11 @@ export const GUST_DECAY_RATE = 2.0;
 // Ground effect
 export const GROUND_EFFECT_WINGSPAN = 14; // meters
 export const GROUND_EFFECT_DRAG_REDUCTION = 0.5; // 50% induced drag reduction
-export const GROUND_EFFECT_LIFT_BONUS = 0.1; // 10% lift increase
+export const GROUND_EFFECT_LIFT_BONUS = 0.15; // 15% lift increase (smooth cushion during flare)
+
+// Chase camera spring-damper
+export const CHASE_SPRING_STIFFNESS = 25.0;  // k - how snappy
+export const CHASE_SPRING_DAMPING = 8.0;      // c - how quickly oscillation dies
 
 // Camera shake
 export const TURBULENCE_SHAKE_INTENSITY = 0.15;
@@ -123,3 +127,9 @@ export const COAST_MARGIN = 800; // transition zone width
 export const BEACH_CENTER_Z = -2000; // z-center of the main beach area
 export const SEAPLANE_X = 15000; // seaplane position (well past coastline + noise)
 export const SEAPLANE_Z = -2000;
+
+// International airport
+export const INTL_AIRPORT_X = -8000;
+export const INTL_AIRPORT_Z = 8000;
+export const INTL_RUNWAY_LENGTH = 3000;
+export const INTL_RUNWAY_WIDTH = 60;

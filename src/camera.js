@@ -13,6 +13,8 @@ import {
   TURBULENCE_SHAKE_INTENSITY,
   LANDING_SHAKE_DECAY_RATE,
   CAMERA_TRANSITION_DURATION,
+  CHASE_SPRING_STIFFNESS,
+  CHASE_SPRING_DAMPING,
 } from './constants.js';
 import { lerp, clamp, smoothstep } from './utils.js';
 import { getAircraftType } from './aircraftTypes.js';
@@ -41,9 +43,17 @@ let transitionFrom = new THREE.Vector3();
 let transitionTarget = new THREE.Vector3();
 let prevMode = 'chase';
 
+// Spring-damper chase camera velocity
+const cameraVelocity = new THREE.Vector3();
+const _springDisplacement = new THREE.Vector3();
+const _springForce = new THREE.Vector3();
+
 // Shake state
 let landingShakeIntensity = 0;
 const shakeOffset = new THREE.Vector3();
+
+// Freeze camera (crash effect)
+let freezeTimer = 0;
 
 export function initCamera() {
   camera = new THREE.PerspectiveCamera(
@@ -146,6 +156,7 @@ export function toggleCamera() {
     transitioning = true;
     transitionTime = 0;
     transitionFrom.copy(camera.position);
+    cameraVelocity.set(0, 0, 0);
     setCockpitVisible(mode === 'cockpit');
 
     // Adjust near clip plane for cockpit geometry visibility
@@ -162,8 +173,18 @@ export function triggerLandingShake(intensity) {
   landingShakeIntensity = Math.min(intensity * 0.5, 2.0);
 }
 
+export function freezeCamera(duration) {
+  freezeTimer = duration;
+}
+
 export function updateCamera(dt) {
   if (!camera) return;
+
+  // Freeze camera for crash effect
+  if (freezeTimer > 0) {
+    freezeTimer -= dt;
+    return;
+  }
 
   const state = getActiveVehicle();
   _forward.set(0, 0, -1).applyQuaternion(state.quaternion).normalize();
@@ -204,6 +225,7 @@ export function updateCamera(dt) {
       transitioning = true;
       transitionTime = 0;
       transitionFrom.copy(camera.position);
+      cameraVelocity.set(0, 0, 0);
       // Restore near clip plane when leaving orbit (which could have been cockpit before)
       camera.near = 0.5;
       camera.updateProjectionMatrix();
@@ -253,12 +275,20 @@ export function updateCamera(dt) {
       _targetPos.y = state.position.y + chaseHeight;
     }
 
-    // Aircraft: smooth follow. Cars: very tight spring (almost locked, slight give for feel)
-    const lerpRate = isPlane ? CHASE_LERP_SPEED * 2.0 : 60.0;
-    const t = 1 - Math.exp(-lerpRate * dt);
-    camera.position.x = lerp(camera.position.x, _targetPos.x, t);
-    camera.position.y = lerp(camera.position.y, _targetPos.y, t);
-    camera.position.z = lerp(camera.position.z, _targetPos.z, t);
+    if (isPlane) {
+      // Spring-damper: F = -k*(pos - target) - c*velocity
+      _springDisplacement.subVectors(camera.position, _targetPos);
+      _springForce.copy(_springDisplacement).multiplyScalar(-CHASE_SPRING_STIFFNESS);
+      _springForce.addScaledVector(cameraVelocity, -CHASE_SPRING_DAMPING);
+      cameraVelocity.addScaledVector(_springForce, dt);
+      camera.position.addScaledVector(cameraVelocity, dt);
+    } else {
+      // Cars: very tight lerp (almost locked, slight give for feel)
+      const t = 1 - Math.exp(-60.0 * dt);
+      camera.position.x = lerp(camera.position.x, _targetPos.x, t);
+      camera.position.y = lerp(camera.position.y, _targetPos.y, t);
+      camera.position.z = lerp(camera.position.z, _targetPos.z, t);
+    }
 
     camera.position.add(shakeOffset);
 
@@ -320,6 +350,7 @@ export function setReplayCameraMode(enabled) {
     transitioning = true;
     transitionTime = 0;
     transitionFrom.copy(camera.position);
+    cameraVelocity.set(0, 0, 0);
     camera.near = 0.5;
     camera.updateProjectionMatrix();
   }
