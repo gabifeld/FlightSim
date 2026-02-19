@@ -126,10 +126,6 @@ export function initWeatherFx(scene) {
   scene.add(rainSystem.points);
   lightningSprite = createLightningSprite(scene);
 
-  // Store refs to scene lights for lightning flash
-  scene.traverse((obj) => {
-    if (obj.isAmbientLight) ambientRef = obj;
-  });
   fogRef = scene.fog;
 
   // Apply default preset so cloud/fog/rain start in sync.

@@ -157,11 +157,15 @@ initMobile();
 // Contextual hints
 initHints();
 
-// Loading complete — fade out loading screen
+// Loading complete — fade out and remove loading screen
 setLoadProgress(100, 'Ready!');
 setTimeout(() => {
   const ls = document.getElementById('loading-screen');
-  if (ls) ls.classList.add('fade-out');
+  if (ls) {
+    ls.classList.add('fade-out');
+    // Fully remove after fade transition completes
+    setTimeout(() => ls.classList.add('hidden'), 600);
+  }
 }, 300);
 
 function resetFlight() {
@@ -203,9 +207,9 @@ setMenuCallbacks({
   },
   onMainMenu: () => {
     resetFlight();
-    // Show aircraft select again
+    // Keep aircraft select hidden until player chooses FLY from the main menu
     const selectPanel = document.getElementById('aircraft-select');
-    if (selectPanel) selectPanel.classList.remove('hidden');
+    if (selectPanel) selectPanel.classList.add('hidden');
   },
 });
 

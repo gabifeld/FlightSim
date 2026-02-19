@@ -210,5 +210,14 @@ export function updateTaxiMode(onGround, speed, x, z) {
 function isOnRunway(x, z) {
   if (Math.abs(x) < RUNWAY_WIDTH / 2 && Math.abs(z) < RUNWAY_LENGTH / 2) return true;
   if (Math.abs(x - AIRPORT2_X) < RUNWAY_WIDTH / 2 && Math.abs(z - AIRPORT2_Z) < RUNWAY_LENGTH / 2) return true;
+  if (_isOnIntlRunway && _isOnIntlRunway(x, z)) return true;
+  if (_isOnIntlTaxiway && _isOnIntlTaxiway(x, z)) return true;
   return false;
+}
+
+let _isOnIntlRunway = null;
+let _isOnIntlTaxiway = null;
+export function registerIntlTaxiChecks(runwayFn, taxiwayFn) {
+  _isOnIntlRunway = runwayFn;
+  _isOnIntlTaxiway = taxiwayFn;
 }

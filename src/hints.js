@@ -1,6 +1,7 @@
 // Contextual hints system — shows one-time hints per flight
 import { isAircraft } from './vehicleState.js';
 import { RUNWAY_LENGTH, AIRPORT2_X, AIRPORT2_Z } from './constants.js';
+import { getSetting } from './settings.js';
 
 const HINTS = {
   firstFlight: {
@@ -33,7 +34,7 @@ const HINTS = {
     text: 'LOW FUEL — LAND SOON',
     check: (vehicle) => {
       if (!isAircraft(vehicle)) return false;
-      return vehicle.fuel !== undefined && vehicle.fuel < 0.15 && !vehicle.unlimitedFuel;
+      return vehicle.fuel !== undefined && vehicle.fuel < 0.15 && !getSetting('unlimitedFuel');
     },
   },
 };

@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { RUNWAY_LENGTH, RUNWAY_WIDTH, AIRPORT2_X, AIRPORT2_Z, SEAPLANE_X, SEAPLANE_Z } from './constants.js';
+import { RUNWAY_LENGTH, RUNWAY_WIDTH, AIRPORT2_X, AIRPORT2_Z, SEAPLANE_X, SEAPLANE_Z, INTL_AIRPORT_X, INTL_AIRPORT_Z, INTL_RUNWAY_LENGTH } from './constants.js';
 import { getAircraftType } from './aircraftTypes.js';
 import { getApproachSpawn } from './landing.js';
 import { isNight } from './scene.js';
@@ -29,6 +29,17 @@ const SPAWN_POSITIONS = {
     z: SEAPLANE_Z,
     heading: Math.PI * 0.9,
     y: -0.5, // on water surface
+  },
+  // International airport (E-W runways)
+  runway_intl: {
+    x: INTL_AIRPORT_X - INTL_RUNWAY_LENGTH / 2 + 100,
+    z: INTL_AIRPORT_Z - 150,
+    heading: Math.PI / 2, // east (runway 09L)
+  },
+  gate_intl: {
+    x: INTL_AIRPORT_X,
+    z: INTL_AIRPORT_Z - 60,
+    heading: -Math.PI / 2, // facing west
   },
 };
 
@@ -125,6 +136,7 @@ export function resetAircraft() {
     aircraftState.aoa = 0;
     aircraftState.propSpeed = 0;
     aircraftState.gForce = 1;
+    aircraftState.fuel = 1.0;
   } else {
     // Ground spawn
     const spawn = SPAWN_POSITIONS[spawnLocation] || SPAWN_POSITIONS.runway;
@@ -146,6 +158,7 @@ export function resetAircraft() {
     aircraftState.aoa = 0;
     aircraftState.propSpeed = 0;
     aircraftState.gForce = 1;
+    aircraftState.fuel = 1.0;
 
     if (spawn.heading) {
       aircraftState.quaternion.setFromAxisAngle(new THREE.Vector3(0, 1, 0), spawn.heading);
@@ -174,6 +187,8 @@ function loadAircraftConfig(typeName) {
     type: type.type,
     wingspan: type.wingSpan || 14,
     isSeaplane: !!type.isSeaplane,
+    fuelCapacity: type.fuelCapacity || 1000,
+    fuelBurnRate: type.fuelBurnRate || 100,
   };
   aircraftState.currentType = typeName;
 }

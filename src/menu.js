@@ -20,9 +20,17 @@ let activePanel = 'main'; // 'main' | 'pause' | 'settings' | 'controls' | null
 let returnTo = null; // which panel to return to from settings/controls
 let onResumeCallback = null;
 let onMainMenuCallback = null;
+let transitionTimer = null;
 
 // DOM refs
 let els = {};
+
+function clearTransitionTimer() {
+  if (transitionTimer !== null) {
+    clearTimeout(transitionTimer);
+    transitionTimer = null;
+  }
+}
 
 export function initMenu() {
   els = {
@@ -58,11 +66,15 @@ export function initMenu() {
 
   // Main menu buttons
   onTap(els.btnFly, () => {
+    clearTransitionTimer();
     hideAllPanels();
     // Show the aircraft selection panel
     const selectPanel = document.getElementById('aircraft-select');
     if (selectPanel) selectPanel.classList.remove('hidden');
-    els.overlay.classList.add('hidden');
+    if (els.overlay) {
+      els.overlay.classList.add('hidden');
+      els.overlay.style.opacity = ''; // clear transition inline style
+    }
     activePanel = null;
   });
 
@@ -192,8 +204,11 @@ function hideAllPanels() {
 
 function transitionTo(name) {
   if (!els.overlay) { showPanel(name); return; }
+  clearTransitionTimer();
+  els.overlay.classList.remove('hidden');
   els.overlay.style.opacity = '0';
-  setTimeout(() => {
+  transitionTimer = setTimeout(() => {
+    transitionTimer = null;
     showPanel(name);
     els.overlay.style.opacity = '1';
   }, 200);
@@ -203,7 +218,10 @@ function showPanel(name) {
   hideAllPanels();
   activePanel = name;
 
-  if (els.overlay) els.overlay.classList.remove('hidden');
+  if (els.overlay) {
+    els.overlay.classList.remove('hidden');
+    els.overlay.style.opacity = '1';
+  }
 
   switch (name) {
     case 'main':
@@ -246,9 +264,13 @@ export function pauseGame() {
 }
 
 function resumeGame() {
+  clearTransitionTimer();
   paused = false;
   hideAllPanels();
-  if (els.overlay) els.overlay.classList.add('hidden');
+  if (els.overlay) {
+    els.overlay.classList.add('hidden');
+    els.overlay.style.opacity = '';  // clear any inline opacity from transitionTo
+  }
   activePanel = null;
 }
 
@@ -267,8 +289,12 @@ export function setMenuCallbacks({ onResume, onMainMenu }) {
 
 // Called when the game starts (after aircraft select START click)
 export function onGameStart() {
+  clearTransitionTimer();
   hideAllPanels();
-  if (els.overlay) els.overlay.classList.add('hidden');
+  if (els.overlay) {
+    els.overlay.classList.add('hidden');
+    els.overlay.style.opacity = '';  // clear any inline opacity from transitionTo
+  }
   activePanel = null;
   paused = false;
 }

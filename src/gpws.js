@@ -99,7 +99,7 @@ export function updateGPWS(dt) {
         calloutCooldown = 1.5;
 
         // Speak the callout
-        const callText = alt >= 100 ? String(alt) : String(alt);
+        const callText = String(alt);
         speak(callText, alt <= 20 ? 1.5 : 1.2);
         break;
       }

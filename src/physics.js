@@ -9,6 +9,7 @@ import { getMobileState, isMobileActive } from './mobile.js';
 import { isLandingAssistActive, updateLandingAssist } from './landing.js';
 import { isAPEngaged, getAPState, updateAutopilot } from './autopilot.js';
 import { isEngineFailed } from './challenges.js';
+import { getSetting } from './settings.js';
 import {
   GRAVITY,
   AIR_DENSITY,
@@ -320,8 +321,18 @@ export function updatePhysics(dt) {
     ? _drag.copy(relativeVelocity).normalize().multiplyScalar(-dragMag)
     : _drag.set(0, 0, 0);
 
+  // Fuel consumption
+  if (!getSetting('unlimitedFuel') && state.fuel !== undefined) {
+    const fuelCapacity = cfg('fuelCapacity', 1000);
+    const fuelBurnRate = cfg('fuelBurnRate', 100);
+    // burnRate is L/hr, convert to L/s; normalize by capacity to get 0-1 consumption
+    state.fuel -= (state.throttle * fuelBurnRate * dt) / (3600 * fuelCapacity);
+    if (state.fuel < 0) state.fuel = 0;
+  }
+
   // Thrust
-  const thrustMag = isEngineFailed() ? 0 : state.throttle * maxThrust;
+  const fuelEmpty = state.fuel !== undefined && state.fuel <= 0 && !getSetting('unlimitedFuel');
+  const thrustMag = (isEngineFailed() || fuelEmpty) ? 0 : state.throttle * maxThrust;
   const thrust = _thrust.copy(_forward).multiplyScalar(thrustMag);
 
   // Gravity

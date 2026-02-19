@@ -22,6 +22,8 @@ export const AIRCRAFT_TYPES = {
     accentColor: 0x1144aa,
     cockpitY: 0.3,
     cockpitZ: -2.8,
+    fuelCapacity: 212,
+    fuelBurnRate: 40,
   },
   boeing_737: {
     name: 'Boeing 737',
@@ -45,6 +47,8 @@ export const AIRCRAFT_TYPES = {
     accentColor: 0x0055aa,
     cockpitY: 0.8,
     cockpitZ: -5.5,
+    fuelCapacity: 26000,
+    fuelBurnRate: 2800,
   },
   f16: {
     name: 'F-16 Falcon',
@@ -68,6 +72,8 @@ export const AIRCRAFT_TYPES = {
     accentColor: 0x556655,
     cockpitY: 0.5,
     cockpitZ: -3.0,
+    fuelCapacity: 3200,
+    fuelBurnRate: 4500,
   },
   airbus_a320: {
     name: 'Airbus A340',
@@ -91,6 +97,8 @@ export const AIRCRAFT_TYPES = {
     accentColor: 0x003366,
     cockpitY: 1.0,
     cockpitZ: -7.0,
+    fuelCapacity: 24000,
+    fuelBurnRate: 2600,
   },
   dhc2_beaver: {
     name: 'DHC-2 Beaver (Seaplane)',
@@ -116,6 +124,8 @@ export const AIRCRAFT_TYPES = {
     accentColor: 0xcc3333,
     cockpitY: 0.3,
     cockpitZ: -3.0,
+    fuelCapacity: 340,
+    fuelBurnRate: 70,
   },
 };
 

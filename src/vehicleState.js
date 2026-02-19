@@ -33,6 +33,7 @@ export function createAircraftState() {
     gear: true,
     speedbrake: false,
     landingLight: false,
+    fuel: 1.0,
     currentType: 'cessna_172',
   });
 }
