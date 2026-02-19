@@ -56,7 +56,7 @@ function createBeach(scene) {
 
   // Sand ground plane
   const sandTex = createSandTexture();
-  const sandMat = new THREE.MeshStandardMaterial({
+  const sandMat = new THREE.MeshLambertMaterial({
     map: sandTex,
     roughness: 0.95,
     metalness: 0.0,
@@ -69,7 +69,7 @@ function createBeach(scene) {
   scene.add(sand);
 
   // Scattered driftwood logs
-  const driftwoodMat = new THREE.MeshStandardMaterial({ color: 0x8b7355, roughness: 0.9 });
+  const driftwoodMat = new THREE.MeshLambertMaterial({ color: 0x8b7355, roughness: 0.9 });
   const driftwoodGeo = new THREE.CylinderGeometry(0.15, 0.2, 4, 6);
   driftwoodGeo.rotateZ(Math.PI / 2);
   for (let i = 0; i < 35; i++) {
@@ -84,7 +84,7 @@ function createBeach(scene) {
   }
 
   // Beach rocks
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x888880, roughness: 0.9 });
+  const rockMat = new THREE.MeshLambertMaterial({ color: 0x888880, roughness: 0.9 });
   const rockGeo = new THREE.DodecahedronGeometry(1, 0);
   for (let i = 0; i < 50; i++) {
     const rock = new THREE.Mesh(rockGeo, rockMat);
@@ -100,8 +100,8 @@ function createBeach(scene) {
   }
 
   // Palm-like beach trees (simple cone + cylinder scattered along upper beach)
-  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.85 });
-  const leafMat = new THREE.MeshStandardMaterial({ color: 0x2d8b1e, roughness: 0.7 });
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x8b6914, roughness: 0.85 });
+  const leafMat = new THREE.MeshLambertMaterial({ color: 0x2d8b1e, roughness: 0.7 });
   const trunkGeo = new THREE.CylinderGeometry(0.15, 0.25, 6, 6);
   const leafGeo = new THREE.ConeGeometry(2.5, 3, 6);
   for (let i = 0; i < 40; i++) {
@@ -129,8 +129,8 @@ function createPier(scene) {
   const pierLen = 120;
   const pierWid = 6;
 
-  const woodMat = new THREE.MeshStandardMaterial({ color: 0x8b6914, roughness: 0.85 });
-  const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x5c4a1e, roughness: 0.9 });
+  const woodMat = new THREE.MeshLambertMaterial({ color: 0x8b6914, roughness: 0.85 });
+  const darkWoodMat = new THREE.MeshLambertMaterial({ color: 0x5c4a1e, roughness: 0.9 });
 
   // Main deck
   const deck = new THREE.Mesh(new THREE.BoxGeometry(pierLen, 0.4, pierWid), woodMat);
@@ -169,7 +169,7 @@ function createPier(scene) {
   }
 
   // Mooring cleats
-  const cleatMat = new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.6 });
+  const cleatMat = new THREE.MeshLambertMaterial({ color: 0x666666, metalness: 0.6 });
   for (let x = 20; x < pierLen; x += 30) {
     const cleat = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.25, 0.8), cleatMat);
     cleat.position.set(pierX + x, 1.85, pierZ + pierWid / 2 - 0.5);
@@ -177,14 +177,14 @@ function createPier(scene) {
   }
 
   // Small dock building at shore end
-  const shedMat = new THREE.MeshStandardMaterial({ color: 0xb8a880, roughness: 0.7 });
+  const shedMat = new THREE.MeshLambertMaterial({ color: 0xb8a880, roughness: 0.7 });
   const shed = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 5), shedMat);
   shed.position.set(pierX - 2, 2, pierZ);
   group.add(shed);
 
   const shedRoof = new THREE.Mesh(
     new THREE.ConeGeometry(4.5, 2, 4),
-    new THREE.MeshStandardMaterial({ color: 0x8b4513, roughness: 0.7 })
+    new THREE.MeshLambertMaterial({ color: 0x8b4513, roughness: 0.7 })
   );
   shedRoof.rotation.y = Math.PI / 4;
   shedRoof.position.set(pierX - 2, 5, pierZ);
@@ -204,14 +204,14 @@ function createSeaplane(scene) {
   const sz = SEAPLANE_Z + 600;
   const waterY = -1.5; // slightly above water surface for visual clarity
 
-  const fuselageMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.4 });
-  const wingMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, roughness: 0.4, metalness: 0.1 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: 0x2244aa, roughness: 0.4 });
-  const engineMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.3, metalness: 0.5 });
-  const floatMat = new THREE.MeshStandardMaterial({ color: 0xcc3333, roughness: 0.5 });
-  const strutMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.5 });
-  const propMat = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.4 });
-  const windowMat = new THREE.MeshStandardMaterial({
+  const fuselageMat = new THREE.MeshLambertMaterial({ color: 0xeeeeee, roughness: 0.4 });
+  const wingMat = new THREE.MeshLambertMaterial({ color: 0xdddddd, roughness: 0.4, metalness: 0.1 });
+  const accentMat = new THREE.MeshLambertMaterial({ color: 0x2244aa, roughness: 0.4 });
+  const engineMat = new THREE.MeshLambertMaterial({ color: 0x333333, roughness: 0.3, metalness: 0.5 });
+  const floatMat = new THREE.MeshLambertMaterial({ color: 0xcc3333, roughness: 0.5 });
+  const strutMat = new THREE.MeshLambertMaterial({ color: 0x888888, metalness: 0.5 });
+  const propMat = new THREE.MeshLambertMaterial({ color: 0x222222, roughness: 0.4 });
+  const windowMat = new THREE.MeshLambertMaterial({
     color: 0x88bbdd, roughness: 0.1, metalness: 0.5,
     transparent: true, opacity: 0.6,
   });
@@ -367,9 +367,9 @@ function createLighthouse(scene) {
   const lx = COAST_LINE_X - 50;
   const lz = BEACH_CENTER_Z + 1800;
 
-  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xf5f5f0, roughness: 0.5 });
-  const redMat = new THREE.MeshStandardMaterial({ color: 0xcc2222, roughness: 0.5 });
-  const baseMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.8 });
+  const whiteMat = new THREE.MeshLambertMaterial({ color: 0xf5f5f0, roughness: 0.5 });
+  const redMat = new THREE.MeshLambertMaterial({ color: 0xcc2222, roughness: 0.5 });
+  const baseMat = new THREE.MeshLambertMaterial({ color: 0x888888, roughness: 0.8 });
 
   // Stone base
   const base = new THREE.Mesh(new THREE.CylinderGeometry(4, 5, 3, 10), baseMat);
@@ -392,7 +392,7 @@ function createLighthouse(scene) {
   group.add(gallery);
 
   // Lantern room (glass)
-  const lanternMat = new THREE.MeshStandardMaterial({
+  const lanternMat = new THREE.MeshLambertMaterial({
     color: 0xaaddff, roughness: 0.1, metalness: 0.4,
     transparent: true, opacity: 0.5,
   });
@@ -409,7 +409,7 @@ function createLighthouse(scene) {
   group.add(dome);
 
   // Light beacon (emissive)
-  const beaconMat = new THREE.MeshStandardMaterial({
+  const beaconMat = new THREE.MeshLambertMaterial({
     color: 0xffffcc, emissive: 0xffff88, emissiveIntensity: 2.0,
   });
   const beacon = new THREE.Mesh(new THREE.SphereGeometry(0.6, 8, 8), beaconMat);
@@ -417,7 +417,7 @@ function createLighthouse(scene) {
   group.add(beacon);
 
   // Rocky outcrop around base
-  const rockMat = new THREE.MeshStandardMaterial({ color: 0x7a7a72, roughness: 0.95 });
+  const rockMat = new THREE.MeshLambertMaterial({ color: 0x7a7a72, roughness: 0.95 });
   const rockGeo = new THREE.DodecahedronGeometry(1, 0);
   for (let i = 0; i < 10; i++) {
     const angle = (i / 10) * Math.PI * 2;
@@ -442,7 +442,7 @@ function createLighthouse(scene) {
 // ═══════════════════════════════════════════════════════════════
 
 function createBuoys(scene) {
-  const buoyMat = new THREE.MeshStandardMaterial({ color: 0xff4400, roughness: 0.5 });
+  const buoyMat = new THREE.MeshLambertMaterial({ color: 0xff4400, roughness: 0.5 });
   const buoyGeo = new THREE.CylinderGeometry(0.4, 0.5, 1.5, 8);
 
   const positions = [
@@ -460,7 +460,7 @@ function createBuoys(scene) {
     scene.add(buoy);
 
     // Small light on top
-    const lightMat = new THREE.MeshStandardMaterial({
+    const lightMat = new THREE.MeshLambertMaterial({
       color: 0xffff00, emissive: 0xffaa00, emissiveIntensity: 0.8,
     });
     const light = new THREE.Mesh(new THREE.SphereGeometry(0.15, 6, 6), lightMat);
@@ -474,8 +474,8 @@ function createBuoys(scene) {
 // ═══════════════════════════════════════════════════════════════
 
 function createSailboats(scene) {
-  const hullMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.5 });
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.4 });
+  const hullMat = new THREE.MeshLambertMaterial({ color: 0xeeeeee, roughness: 0.5 });
+  const mastMat = new THREE.MeshLambertMaterial({ color: 0xcccccc, metalness: 0.4 });
 
   const boats = [
     { x: COAST_LINE_X + 300, z: BEACH_CENTER_Z + 200, ry: 0.5, hullColor: 0x2255aa },
@@ -485,7 +485,7 @@ function createSailboats(scene) {
 
   for (const b of boats) {
     const group = new THREE.Group();
-    const hColor = new THREE.MeshStandardMaterial({ color: b.hullColor, roughness: 0.5 });
+    const hColor = new THREE.MeshLambertMaterial({ color: b.hullColor, roughness: 0.5 });
 
     // Hull (simple tapered shape)
     const hullGeo = new THREE.CylinderGeometry(0.6, 0.3, 6, 6);
@@ -496,7 +496,7 @@ function createSailboats(scene) {
     group.add(hull);
 
     // Deck
-    const deckMat = new THREE.MeshStandardMaterial({ color: 0xddc090, roughness: 0.7 });
+    const deckMat = new THREE.MeshLambertMaterial({ color: 0xddc090, roughness: 0.7 });
     const deck = new THREE.Mesh(new THREE.BoxGeometry(5, 0.1, 1), deckMat);
     deck.position.set(b.x, -1.2, b.z);
     group.add(deck);

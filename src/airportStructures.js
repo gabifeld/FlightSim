@@ -8,15 +8,15 @@ let _concreteMat, _metalMat, _glassMat, _darkMetalMat, _whiteMat, _asphaltMat;
 
 function ensureMaterials() {
   if (_concreteMat) return;
-  _concreteMat = new THREE.MeshStandardMaterial({ color: 0xbbbbbb, roughness: 0.8 });
-  _metalMat = new THREE.MeshStandardMaterial({ color: 0x889098, roughness: 0.4, metalness: 0.4 });
-  _glassMat = new THREE.MeshStandardMaterial({
+  _concreteMat = new THREE.MeshLambertMaterial({ color: 0xbbbbbb, roughness: 0.8 });
+  _metalMat = new THREE.MeshLambertMaterial({ color: 0x889098, roughness: 0.4, metalness: 0.4 });
+  _glassMat = new THREE.MeshLambertMaterial({
     color: 0x88bbdd, roughness: 0.1, metalness: 0.6,
     transparent: true, opacity: 0.7,
   });
-  _darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x445566, roughness: 0.5, metalness: 0.3 });
-  _whiteMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.5 });
-  _asphaltMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 });
+  _darkMetalMat = new THREE.MeshLambertMaterial({ color: 0x445566, roughness: 0.5, metalness: 0.3 });
+  _whiteMat = new THREE.MeshLambertMaterial({ color: 0xf0f0f0, roughness: 0.5 });
+  _asphaltMat = new THREE.MeshLambertMaterial({ color: 0x333333, roughness: 0.9 });
 }
 
 function addBox(group, geo, mat, x, y, z, opts = {}) {
@@ -36,11 +36,11 @@ function createParkedAircraft(scene, ox, oz, count) {
   const gateZPositions = [-60, -20, 20]; // G1, G2, G3 (G4 at +60 left empty)
   const gateX = ox + halfWid + 295;
 
-  const fuselageMat = new THREE.MeshStandardMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0.1 });
-  const wingMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.35, metalness: 0.2 });
-  const engineMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.3, metalness: 0.5 });
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0x2255aa, roughness: 0.4 });
-  const noseMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.5 });
+  const fuselageMat = new THREE.MeshLambertMaterial({ color: 0xf0f0f0, roughness: 0.4, metalness: 0.1 });
+  const wingMat = new THREE.MeshLambertMaterial({ color: 0xcccccc, roughness: 0.35, metalness: 0.2 });
+  const engineMat = new THREE.MeshLambertMaterial({ color: 0x444444, roughness: 0.3, metalness: 0.5 });
+  const tailMat = new THREE.MeshLambertMaterial({ color: 0x2255aa, roughness: 0.4 });
+  const noseMat = new THREE.MeshLambertMaterial({ color: 0x333333, roughness: 0.5 });
 
   const fuselageGeo = new THREE.CylinderGeometry(1.8, 1.8, 35, 10);
   fuselageGeo.rotateZ(Math.PI / 2);
@@ -103,7 +103,7 @@ function createConcourseExtension(scene, ox, oz) {
   const group = new THREE.Group();
   const cx = ox + 220;
   const cz = oz - 75;
-  const wallMat = new THREE.MeshStandardMaterial({ color: 0xd4cfc4, roughness: 0.7 });
+  const wallMat = new THREE.MeshLambertMaterial({ color: 0xd4cfc4, roughness: 0.7 });
 
   // Main corridor running east-west
   const corridor = new THREE.Mesh(new THREE.BoxGeometry(55, 12, 10), wallMat);
@@ -122,7 +122,7 @@ function createConcourseExtension(scene, ox, oz) {
   group.add(roof);
 
   // 2 jet bridges off the concourse
-  const bridgeMat = new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.5 });
+  const bridgeMat = new THREE.MeshLambertMaterial({ color: 0xaaaaaa, roughness: 0.5 });
   for (let i = 0; i < 2; i++) {
     const bz = cz - 14;
     const bx = cx - 12 + i * 24;
@@ -150,8 +150,8 @@ function createCargoArea(scene, ox, oz) {
   const cx = ox + 340;
   const cz = oz + 160;
 
-  const corrugatedMat = new THREE.MeshStandardMaterial({ color: 0x889098, roughness: 0.5, metalness: 0.3 });
-  const dockDoorMat = new THREE.MeshStandardMaterial({ color: 0x556677, roughness: 0.6 });
+  const corrugatedMat = new THREE.MeshLambertMaterial({ color: 0x889098, roughness: 0.5, metalness: 0.3 });
+  const dockDoorMat = new THREE.MeshLambertMaterial({ color: 0x556677, roughness: 0.6 });
 
   // Main warehouse
   const warehouse = new THREE.Mesh(new THREE.BoxGeometry(60, 10, 25), corrugatedMat);
@@ -190,7 +190,7 @@ function createCargoArea(scene, ox, oz) {
   // Concrete loading pad
   const pad = new THREE.Mesh(
     new THREE.PlaneGeometry(65, 15),
-    new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.85 })
+    new THREE.MeshLambertMaterial({ color: 0x999999, roughness: 0.85 })
   );
   pad.rotation.x = -Math.PI / 2;
   pad.position.set(cx, 0.06, cz - 20);
@@ -210,8 +210,8 @@ function createFireStation(scene, ox, oz) {
   const fx = ox - 50;
   const fz = oz - 700;
 
-  const brickMat = new THREE.MeshStandardMaterial({ color: 0xBB3333, roughness: 0.7 });
-  const garageDoorMat = new THREE.MeshStandardMaterial({ color: 0x992222, roughness: 0.5 });
+  const brickMat = new THREE.MeshLambertMaterial({ color: 0xBB3333, roughness: 0.7 });
+  const garageDoorMat = new THREE.MeshLambertMaterial({ color: 0x992222, roughness: 0.5 });
 
   // Main building
   const building = new THREE.Mesh(new THREE.BoxGeometry(22, 7, 16), brickMat);
@@ -245,7 +245,7 @@ function createFireStation(scene, ox, oz) {
   // Concrete parking pad
   const pad = new THREE.Mesh(
     new THREE.PlaneGeometry(25, 12),
-    new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.85 })
+    new THREE.MeshLambertMaterial({ color: 0x999999, roughness: 0.85 })
   );
   pad.rotation.x = -Math.PI / 2;
   pad.position.set(fx + 22, 0.06, fz);
@@ -291,7 +291,7 @@ function createPerimeterFence(scene, ox, oz) {
 
   // Posts via InstancedMesh
   const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 2.4, 4);
-  const postMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.5, roughness: 0.4 });
+  const postMat = new THREE.MeshLambertMaterial({ color: 0x888888, metalness: 0.5, roughness: 0.4 });
   const postMesh = new THREE.InstancedMesh(postGeo, postMat, postPositions.length);
   const dummy = new THREE.Object3D();
 
@@ -307,7 +307,7 @@ function createPerimeterFence(scene, ox, oz) {
   scene.add(postMesh);
 
   // Panel segments via InstancedMesh
-  const panelMat = new THREE.MeshStandardMaterial({
+  const panelMat = new THREE.MeshLambertMaterial({
     color: 0xaaaaaa,
     transparent: true,
     opacity: 0.3,
@@ -357,7 +357,7 @@ function createPerimeterFence(scene, ox, oz) {
 
 function createBlastFences(scene, ox, oz) {
   const halfLen = RUNWAY_LENGTH / 2;
-  const blastMat = new THREE.MeshStandardMaterial({
+  const blastMat = new THREE.MeshLambertMaterial({
     color: 0x667788, roughness: 0.5, metalness: 0.4,
     side: THREE.DoubleSide,
   });
@@ -377,7 +377,7 @@ function createBlastFences(scene, ox, oz) {
     for (const side of [-5, 0, 5]) {
       const post = new THREE.Mesh(
         new THREE.CylinderGeometry(0.12, 0.12, 5.5, 6),
-        new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.5 })
+        new THREE.MeshLambertMaterial({ color: 0x666666, metalness: 0.5 })
       );
       post.position.set(bx + side, 2.75, bz - 0.3 * endSign);
       group.add(post);
@@ -397,8 +397,8 @@ function createFuelFarm(scene, ox, oz) {
   const fx = ox + 380;
   const fz = oz + 120;
 
-  const tankMat = new THREE.MeshStandardMaterial({ color: 0xeeeeee, roughness: 0.3, metalness: 0.4 });
-  const bermMat = new THREE.MeshStandardMaterial({ color: 0x999988, roughness: 0.9 });
+  const tankMat = new THREE.MeshLambertMaterial({ color: 0xeeeeee, roughness: 0.3, metalness: 0.4 });
+  const bermMat = new THREE.MeshLambertMaterial({ color: 0x999988, roughness: 0.9 });
 
   // 4 upright cylindrical tanks in 2x2 grid
   const tankGeo = new THREE.CylinderGeometry(5, 5, 10, 12);
@@ -450,7 +450,7 @@ function createFuelFarm(scene, ox, oz) {
   group.add(pumpHouse);
 
   // Piping between tanks (horizontal pipes)
-  const pipeMat = new THREE.MeshStandardMaterial({ color: 0x666666, metalness: 0.5 });
+  const pipeMat = new THREE.MeshLambertMaterial({ color: 0x666666, metalness: 0.5 });
   const pipeGeo = new THREE.CylinderGeometry(0.2, 0.2, 14, 6);
   pipeGeo.rotateZ(Math.PI / 2);
   const pipe1 = new THREE.Mesh(pipeGeo, pipeMat);
@@ -472,8 +472,8 @@ function createWaterTower(scene, ox, oz) {
   const wx = ox + 400;
   const wz = oz - 100;
 
-  const steelMat = new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.6 });
-  const tankColor = new THREE.MeshStandardMaterial({ color: 0xccccdd, roughness: 0.35, metalness: 0.3 });
+  const steelMat = new THREE.MeshLambertMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.6 });
+  const tankColor = new THREE.MeshLambertMaterial({ color: 0xccccdd, roughness: 0.35, metalness: 0.3 });
 
   // Spherical tank
   const tank = new THREE.Mesh(new THREE.SphereGeometry(4.5, 12, 10), tankColor);
@@ -495,7 +495,7 @@ function createWaterTower(scene, ox, oz) {
   }
 
   // Cross-bracing between legs (X-braces on each face)
-  const braceMat = new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.5 });
+  const braceMat = new THREE.MeshLambertMaterial({ color: 0x777777, metalness: 0.5 });
   const braceGeo = new THREE.CylinderGeometry(0.06, 0.06, 10, 4);
   const bracePairs = [
     [legOffsets[0], legOffsets[1]],
@@ -514,7 +514,7 @@ function createWaterTower(scene, ox, oz) {
   }
 
   // Red obstruction light on top
-  const lightMat = new THREE.MeshStandardMaterial({
+  const lightMat = new THREE.MeshLambertMaterial({
     color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 1.5,
   });
   const light = new THREE.Mesh(new THREE.SphereGeometry(0.3, 6, 6), lightMat);
@@ -543,7 +543,7 @@ function createRadarDome(scene, ox, oz) {
   const rz = oz + 400;
 
   // White hemisphere dome
-  const domeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+  const domeMat = new THREE.MeshLambertMaterial({ color: 0xffffff, roughness: 0.4 });
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(3.5, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2),
     domeMat
@@ -562,13 +562,13 @@ function createRadarDome(scene, ox, oz) {
   group.add(shelter);
 
   // Antenna mast
-  const mastMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, metalness: 0.5 });
+  const mastMat = new THREE.MeshLambertMaterial({ color: 0xcccccc, metalness: 0.5 });
   const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.1, 6, 4), mastMat);
   mast.position.set(rx, 8, rz);
   group.add(mast);
 
   // Small dish on mast
-  const dishMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.6 });
+  const dishMat = new THREE.MeshLambertMaterial({ color: 0xdddddd, metalness: 0.6 });
   const dish = new THREE.Mesh(
     new THREE.SphereGeometry(0.8, 6, 4, 0, Math.PI),
     dishMat
@@ -593,7 +593,7 @@ function createDeIcingPad(scene, ox, oz) {
   // Concrete pad
   const pad = new THREE.Mesh(
     new THREE.PlaneGeometry(25, 20),
-    new THREE.MeshStandardMaterial({ color: 0xaaaaaa, roughness: 0.85 })
+    new THREE.MeshLambertMaterial({ color: 0xaaaaaa, roughness: 0.85 })
   );
   pad.rotation.x = -Math.PI / 2;
   pad.position.set(dx, 0.06, dz);
@@ -616,7 +616,7 @@ function createDeIcingPad(scene, ox, oz) {
   }
 
   // Chemical tank on cradle (horizontal cylinder)
-  const chemTankMat = new THREE.MeshStandardMaterial({ color: 0x448844, roughness: 0.5 });
+  const chemTankMat = new THREE.MeshLambertMaterial({ color: 0x448844, roughness: 0.5 });
   const chemTank = new THREE.Mesh(
     new THREE.CylinderGeometry(1.5, 1.5, 8, 10),
     chemTankMat
@@ -707,11 +707,11 @@ function createAirportHotel(scene, ox, oz) {
   const hz = oz - 130;
 
   const hotelTex = createHotelWindowTexture();
-  const hotelMat = new THREE.MeshStandardMaterial({
+  const hotelMat = new THREE.MeshLambertMaterial({
     map: hotelTex,
     roughness: 0.7,
   });
-  const roofMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.5 });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x555555, roughness: 0.5 });
 
   // Main building (6-story)
   const building = new THREE.Mesh(new THREE.BoxGeometry(28, 18, 22), hotelMat);
@@ -732,13 +732,13 @@ function createAirportHotel(scene, ox, oz) {
   // Porte-cochere canopy
   const canopy = new THREE.Mesh(
     new THREE.BoxGeometry(16, 0.3, 8),
-    new THREE.MeshStandardMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.5 })
+    new THREE.MeshLambertMaterial({ color: 0x999999, roughness: 0.3, metalness: 0.5 })
   );
   canopy.position.set(hx, 5, hz - 20);
   group.add(canopy);
 
   // Canopy support columns
-  const colMat = new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.4 });
+  const colMat = new THREE.MeshLambertMaterial({ color: 0x888888, metalness: 0.4 });
   for (const cx of [-6, 6]) {
     const col = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 5, 6), colMat);
     col.position.set(hx + cx, 2.5, hz - 24);
@@ -746,7 +746,7 @@ function createAirportHotel(scene, ox, oz) {
   }
 
   // Rooftop "HOTEL" sign (emissive)
-  const signMat = new THREE.MeshStandardMaterial({
+  const signMat = new THREE.MeshLambertMaterial({
     color: 0xff8800,
     emissive: 0xff6600,
     emissiveIntensity: 0.8,
@@ -759,7 +759,7 @@ function createAirportHotel(scene, ox, oz) {
   for (let i = 0; i < 3; i++) {
     const hvac = new THREE.Mesh(
       new THREE.BoxGeometry(3, 1.5, 2),
-      new THREE.MeshStandardMaterial({ color: 0x777777, metalness: 0.3 })
+      new THREE.MeshLambertMaterial({ color: 0x777777, metalness: 0.3 })
     );
     hvac.position.set(hx - 8 + i * 8, 19.25, hz + 5);
     group.add(hvac);
@@ -777,9 +777,9 @@ function createMaintenanceHangars(scene, ox, oz) {
   const group = new THREE.Group();
   const mx = ox + 370;
 
-  const hangarMat = new THREE.MeshStandardMaterial({ color: 0x8899aa, roughness: 0.5, metalness: 0.3 });
-  const doorMat = new THREE.MeshStandardMaterial({ color: 0x445566, roughness: 0.6 });
-  const equipMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.5 });
+  const hangarMat = new THREE.MeshLambertMaterial({ color: 0x8899aa, roughness: 0.5, metalness: 0.3 });
+  const doorMat = new THREE.MeshLambertMaterial({ color: 0x445566, roughness: 0.6 });
+  const equipMat = new THREE.MeshLambertMaterial({ color: 0x666666, roughness: 0.5 });
 
   for (const side of [-1, 1]) {
     const mz = oz + side * 20;
@@ -827,7 +827,7 @@ function createMaintenanceHangars(scene, ox, oz) {
 // ═══════════════════════════════════════════════════════════════
 
 function createGSETruck(group, x, z, color, height, ry = 0) {
-  const bodyMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+  const bodyMat = new THREE.MeshLambertMaterial({ color, roughness: 0.6 });
 
   const cab = new THREE.Mesh(new THREE.BoxGeometry(2.5, height, 2.5), bodyMat);
   cab.position.set(x - 1.5, height / 2, z);
@@ -836,7 +836,7 @@ function createGSETruck(group, x, z, color, height, ry = 0) {
 
   const cargo = new THREE.Mesh(
     new THREE.BoxGeometry(4, height * 0.8, 2.8),
-    new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5 })
+    new THREE.MeshLambertMaterial({ color: 0x888888, roughness: 0.5 })
   );
   cargo.position.set(x + 1.5, height * 0.4, z);
   cargo.rotation.y = ry;
@@ -852,7 +852,7 @@ function createExtraGSE(scene, ox, oz) {
   createGSETruck(group, apronCenterX - 15, oz + 35, 0xdddddd, 2.8);
 
   // 2 belt loaders (low, angled)
-  const beltMat = new THREE.MeshStandardMaterial({ color: 0xcc8800, roughness: 0.6 });
+  const beltMat = new THREE.MeshLambertMaterial({ color: 0xcc8800, roughness: 0.6 });
   for (let i = 0; i < 2; i++) {
     const bx = apronCenterX - 25 + i * 50;
     const bz = oz - 15 + i * 30;
@@ -863,7 +863,7 @@ function createExtraGSE(scene, ox, oz) {
     // Conveyor belt (angled)
     const belt = new THREE.Mesh(
       new THREE.BoxGeometry(6, 0.2, 1.5),
-      new THREE.MeshStandardMaterial({ color: 0x333333 })
+      new THREE.MeshLambertMaterial({ color: 0x333333 })
     );
     belt.position.set(bx + 3, 2, bz);
     belt.rotation.z = -0.3;
@@ -874,7 +874,7 @@ function createExtraGSE(scene, ox, oz) {
   createGSETruck(group, apronCenterX + 10, oz + 45, 0x3366aa, 2.2);
 
   // 3 baggage carts scattered around apron
-  const cartMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
+  const cartMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
   const cartGeo = new THREE.BoxGeometry(1.5, 0.8, 2.5);
   const cartPositions = [
     { x: apronCenterX - 10, z: oz - 25 },

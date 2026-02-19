@@ -473,11 +473,11 @@ function buildBuildings(scene, buildings) {
     scene.add(mesh);
   }
 
-  const concreteMat = new THREE.MeshStandardMaterial({ map: concreteTex, roughness: 0.85, metalness: 0.05 });
-  const glassMat = new THREE.MeshStandardMaterial({ map: glassTex, roughness: 0.1, metalness: 0.7 });
-  const bokaapMat = new THREE.MeshStandardMaterial({ map: bokaapTex, roughness: 0.85, metalness: 0.02 });
-  const harborMat = new THREE.MeshStandardMaterial({ map: harborTex, roughness: 0.9, metalness: 0.1 });
-  const podiumMat = new THREE.MeshStandardMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
+  const concreteMat = new THREE.MeshLambertMaterial({ map: concreteTex, roughness: 0.85, metalness: 0.05 });
+  const glassMat = new THREE.MeshLambertMaterial({ map: glassTex, roughness: 0.1, metalness: 0.7 });
+  const bokaapMat = new THREE.MeshLambertMaterial({ map: bokaapTex, roughness: 0.85, metalness: 0.02 });
+  const harborMat = new THREE.MeshLambertMaterial({ map: harborTex, roughness: 0.9, metalness: 0.1 });
+  const podiumMat = new THREE.MeshLambertMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
 
   // CBD boxes (concrete & glass)
   placeInstanced(unitBox, concreteMat, categories.cbdConcreteBox, CBD_CONCRETE_COLORS);
@@ -502,7 +502,7 @@ function buildBuildings(scene, buildings) {
   if (categories.bokaap.length > 0) {
     const roofGeo = new THREE.ConeGeometry(0.72, 1, 4);
     roofGeo.rotateY(Math.PI * 0.25);
-    const roofMat = new THREE.MeshStandardMaterial({ color: 0x6a4a30, roughness: 0.85 });
+    const roofMat = new THREE.MeshLambertMaterial({ color: 0x6a4a30, roughness: 0.85 });
     const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, categories.bokaap.length);
     const roofBaseColor = new THREE.Color(0x6a4a30);
     const roofColor = new THREE.Color();
@@ -536,7 +536,7 @@ function buildBuildings(scene, buildings) {
   const tallConcrete = buildings.filter(b => b.h > 18 && !b.glass && b.shape !== 'cylinder' && b.district !== 'bokaap' && b.district !== 'harbor');
   if (tallConcrete.length > 0) {
     const slabGeo = new THREE.BoxGeometry(1, 1, 1);
-    const slabMat = new THREE.MeshStandardMaterial({ color: 0x999990, roughness: 0.9 });
+    const slabMat = new THREE.MeshLambertMaterial({ color: 0x999990, roughness: 0.9 });
     const slabMesh = new THREE.InstancedMesh(slabGeo, slabMat, tallConcrete.length);
     for (let i = 0; i < tallConcrete.length; i++) {
       const b = tallConcrete[i];
@@ -556,7 +556,7 @@ function buildBuildings(scene, buildings) {
   const awningCount = Math.min(awningCandidates.length, 400);
   if (awningCount > 0) {
     const awningGeo = new THREE.BoxGeometry(1, 0.15, 1);
-    const awningMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
+    const awningMat = new THREE.MeshLambertMaterial({ color: 0x555555, roughness: 0.8 });
     const awningMesh = new THREE.InstancedMesh(awningGeo, awningMat, awningCount);
     const awningColors = [
       new THREE.Color(0x884422), new THREE.Color(0x448844),
@@ -595,7 +595,7 @@ function buildBuildings(scene, buildings) {
   totalWindows = Math.min(totalWindows, 3000);
 
   const winGeo = new THREE.PlaneGeometry(1.5, 1.0);
-  const winMat = new THREE.MeshStandardMaterial({
+  const winMat = new THREE.MeshLambertMaterial({
     color: 0x000000, emissive: 0xFFDD88, emissiveIntensity: 0.8,
     transparent: true, opacity: 0.6, side: THREE.DoubleSide,
   });
@@ -661,7 +661,7 @@ function buildRooftopDetails(scene, buildings) {
 
   if (roofAC.length > 0) {
     const acGeo = new THREE.BoxGeometry(1, 1, 1);
-    const acMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
+    const acMat = new THREE.MeshLambertMaterial({ color: 0x555555, roughness: 0.8 });
     const acMesh = new THREE.InstancedMesh(acGeo, acMat, roofAC.length);
     for (let i = 0; i < roofAC.length; i++) {
       const a = roofAC[i];
@@ -678,7 +678,7 @@ function buildRooftopDetails(scene, buildings) {
 
   if (roofAntennas.length > 0) {
     const antGeo = new THREE.CylinderGeometry(0.15, 0.15, 8, 4);
-    const antMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.5, roughness: 0.3 });
+    const antMat = new THREE.MeshLambertMaterial({ color: 0x999999, metalness: 0.5, roughness: 0.3 });
     const antMesh = new THREE.InstancedMesh(antGeo, antMat, roofAntennas.length);
     for (let i = 0; i < roofAntennas.length; i++) {
       const a = roofAntennas[i];
@@ -696,7 +696,7 @@ function buildRooftopDetails(scene, buildings) {
   const tallBuildings = buildings.filter(b => b.h > 30);
   if (tallBuildings.length > 0) {
     const obGeo = new THREE.SphereGeometry(0.3, 6, 5);
-    const obMat = new THREE.MeshStandardMaterial({
+    const obMat = new THREE.MeshLambertMaterial({
       color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 2.0, roughness: 0.3,
     });
     const obMesh = new THREE.InstancedMesh(obGeo, obMat, tallBuildings.length);
@@ -743,7 +743,7 @@ function buildRoads(scene) {
       const geo = new THREE.PlaneGeometry(majorW, len);
       geo.rotateX(-Math.PI / 2);
       majorTex.repeat.set(1, Math.max(1, Math.round(len / 20)));
-      const mat = new THREE.MeshStandardMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0 });
+      const mat = new THREE.MeshLambertMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0 });
       mat.map.repeat.set(1, Math.max(1, Math.round(len / 20)));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(road.x, Y, (road.z0 + road.z1) / 2);
@@ -753,7 +753,7 @@ function buildRoads(scene) {
       const len = road.x1 - road.x0;
       const geo = new THREE.PlaneGeometry(majorW, len);
       geo.rotateX(-Math.PI / 2);
-      const mat = new THREE.MeshStandardMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0 });
+      const mat = new THREE.MeshLambertMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0 });
       mat.map.repeat.set(1, Math.max(1, Math.round(len / 20)));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set((road.x0 + road.x1) / 2, Y, road.z);
@@ -794,7 +794,7 @@ function buildRoads(scene) {
     const minorGeo = new THREE.PlaneGeometry(minorW, 1);
     minorGeo.rotateX(-Math.PI / 2);
     const minorTex = makeRoadTex(false);
-    const minorMat = new THREE.MeshStandardMaterial({ map: minorTex, roughness: 0.92, metalness: 0 });
+    const minorMat = new THREE.MeshLambertMaterial({ map: minorTex, roughness: 0.92, metalness: 0 });
 
     const minorMesh = new THREE.InstancedMesh(minorGeo, minorMat, minorPositions.length);
     minorMesh.receiveShadow = true;
@@ -831,7 +831,7 @@ function buildSidewalks(scene) {
   ];
 
   const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x8a8a88, roughness: 0.95, metalness: 0 });
+  const mat = new THREE.MeshLambertMaterial({ color: 0x8a8a88, roughness: 0.95, metalness: 0 });
   const mesh = new THREE.InstancedMesh(geo, mat, sidewalkAreas.length);
   mesh.receiveShadow = true;
   for (let i = 0; i < sidewalkAreas.length; i++) {
@@ -872,7 +872,7 @@ function buildStadium(scene) {
   }
 
   const bowlGeo = new THREE.LatheGeometry(pts, 32);
-  const bowlMat = new THREE.MeshStandardMaterial({ color: 0xDDDDDD, roughness: 0.7, metalness: 0.1 });
+  const bowlMat = new THREE.MeshLambertMaterial({ color: 0xDDDDDD, roughness: 0.7, metalness: 0.1 });
   const bowl = new THREE.Mesh(bowlGeo, bowlMat);
   bowl.position.set(sx, 0, sz);
   bowl.receiveShadow = true;
@@ -881,7 +881,7 @@ function buildStadium(scene) {
   // Green field
   const fieldGeo = new THREE.CircleGeometry(r - 30, 32);
   fieldGeo.rotateX(-Math.PI / 2);
-  const fieldMat = new THREE.MeshStandardMaterial({ color: 0x2a8a2a, roughness: 0.9 });
+  const fieldMat = new THREE.MeshLambertMaterial({ color: 0x2a8a2a, roughness: 0.9 });
   const field = new THREE.Mesh(fieldGeo, fieldMat);
   field.position.set(sx, 0.5, sz);
   field.receiveShadow = true;
@@ -889,7 +889,7 @@ function buildStadium(scene) {
 
   // Stadium flood lights (4 tall poles)
   const floodGeo = new THREE.SphereGeometry(2, 6, 5);
-  const floodMat = new THREE.MeshStandardMaterial({
+  const floodMat = new THREE.MeshLambertMaterial({
     color: 0xFFFFFF, emissive: 0xFFEECC, emissiveIntensity: 0.5, roughness: 0.3,
   });
   const floodMesh = new THREE.InstancedMesh(floodGeo, floodMat, 4);
@@ -910,7 +910,7 @@ function buildStadium(scene) {
 
   // Flood light poles
   const poleGeo = new THREE.CylinderGeometry(0.5, 0.8, h + 10, 6);
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.4 });
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0x666666, roughness: 0.6, metalness: 0.4 });
   const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, 4);
   for (let i = 0; i < 4; i++) {
     const angle = floodAngles[i];
@@ -932,7 +932,7 @@ function buildHarbor(scene) {
 
   // Dock platform
   const dockGeo = new THREE.BoxGeometry(400, 2, 800);
-  const dockMat = new THREE.MeshStandardMaterial({ color: 0x888880, roughness: 0.95 });
+  const dockMat = new THREE.MeshLambertMaterial({ color: 0x888880, roughness: 0.95 });
   const dock = new THREE.Mesh(dockGeo, dockMat);
   dock.position.set(12050, 1, -200);
   dock.receiveShadow = true;
@@ -942,7 +942,7 @@ function buildHarbor(scene) {
   const craneCount = 6;
   const craneLegGeo = new THREE.BoxGeometry(2, 40, 2);
   const craneBoomGeo = new THREE.BoxGeometry(2, 2, 40);
-  const craneMat = new THREE.MeshStandardMaterial({ color: 0xCC2222, roughness: 0.6, metalness: 0.3 });
+  const craneMat = new THREE.MeshLambertMaterial({ color: 0xCC2222, roughness: 0.6, metalness: 0.3 });
 
   // Crane legs (4 legs per crane = 24)
   const legMesh = new THREE.InstancedMesh(craneLegGeo, craneMat, craneCount * 4);
@@ -980,7 +980,7 @@ function buildHarbor(scene) {
 
   // Shipping containers (80 stacked)
   const containerGeo = new THREE.BoxGeometry(2.5, 2.5, 6);
-  const containerMat = new THREE.MeshStandardMaterial({ roughness: 0.7, metalness: 0.2 });
+  const containerMat = new THREE.MeshLambertMaterial({ roughness: 0.7, metalness: 0.2 });
   const containerCount = 80;
   const containerMesh = new THREE.InstancedMesh(containerGeo, containerMat, containerCount);
 
@@ -1014,7 +1014,7 @@ function buildWaterfrontFeatures(scene) {
 
   // Rim (torus)
   const rimGeo = new THREE.TorusGeometry(fwR, 0.5, 8, 32);
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0xCCCCCC, roughness: 0.4, metalness: 0.6 });
+  const rimMat = new THREE.MeshLambertMaterial({ color: 0xCCCCCC, roughness: 0.4, metalness: 0.6 });
   const rim = new THREE.Mesh(rimGeo, rimMat);
   rim.position.set(fwX, fwH + fwR, fwZ);
   rim.rotation.y = Math.PI / 2;
@@ -1022,7 +1022,7 @@ function buildWaterfrontFeatures(scene) {
 
   // Spokes (instanced cylinders)
   const spokeGeo = new THREE.CylinderGeometry(0.15, 0.15, fwR * 2, 4);
-  const spokeMat = new THREE.MeshStandardMaterial({ color: 0xAAAAAA, roughness: 0.4, metalness: 0.5 });
+  const spokeMat = new THREE.MeshLambertMaterial({ color: 0xAAAAAA, roughness: 0.4, metalness: 0.5 });
   const spokeCount = 12;
   const spokeMesh = new THREE.InstancedMesh(spokeGeo, spokeMat, spokeCount);
   for (let i = 0; i < spokeCount; i++) {
@@ -1038,7 +1038,7 @@ function buildWaterfrontFeatures(scene) {
 
   // Support legs
   const legGeo = new THREE.CylinderGeometry(0.4, 0.6, fwH + fwR, 6);
-  const legMat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.4 });
+  const legMat = new THREE.MeshLambertMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.4 });
   const leg1 = new THREE.Mesh(legGeo, legMat);
   leg1.position.set(fwX, (fwH + fwR) / 2, fwZ - 3);
   leg1.rotation.z = 0.08;
@@ -1051,14 +1051,14 @@ function buildWaterfrontFeatures(scene) {
   // Clock Tower at (11200, 0)
   const ctX = 11200, ctZ = 0, ctH = 25;
   const towerGeo = new THREE.BoxGeometry(3, ctH, 3);
-  const towerMat = new THREE.MeshStandardMaterial({ color: 0xC8A888, roughness: 0.8 });
+  const towerMat = new THREE.MeshLambertMaterial({ color: 0xC8A888, roughness: 0.8 });
   const tower = new THREE.Mesh(towerGeo, towerMat);
   tower.position.set(ctX, ctH / 2, ctZ);
   scene.add(tower);
 
   // Clock face (simple circle)
   const clockGeo = new THREE.CircleGeometry(1.5, 16);
-  const clockMat = new THREE.MeshStandardMaterial({ color: 0xFFF8E0, emissive: 0xFFF8E0, emissiveIntensity: 0.3 });
+  const clockMat = new THREE.MeshLambertMaterial({ color: 0xFFF8E0, emissive: 0xFFF8E0, emissiveIntensity: 0.3 });
   const clockFace1 = new THREE.Mesh(clockGeo, clockMat);
   clockFace1.position.set(ctX + 1.55, ctH - 3, ctZ);
   clockFace1.rotation.y = Math.PI / 2;
@@ -1070,7 +1070,7 @@ function buildWaterfrontFeatures(scene) {
 
   // Promenade walkway along waterfront (X=11600, Z: -1000 to 1000)
   const promGeo = new THREE.BoxGeometry(8, 0.6, 2000);
-  const promMat = new THREE.MeshStandardMaterial({ color: 0xA09888, roughness: 0.9 });
+  const promMat = new THREE.MeshLambertMaterial({ color: 0xA09888, roughness: 0.9 });
   const prom = new THREE.Mesh(promGeo, promMat);
   prom.position.set(11600, 0.3, 0);
   prom.receiveShadow = true;
@@ -1078,7 +1078,7 @@ function buildWaterfrontFeatures(scene) {
 
   // Railing posts along promenade
   const railGeo = new THREE.CylinderGeometry(0.08, 0.08, 1.2, 4);
-  const railMat = new THREE.MeshStandardMaterial({ color: 0x444444, roughness: 0.5, metalness: 0.6 });
+  const railMat = new THREE.MeshLambertMaterial({ color: 0x444444, roughness: 0.5, metalness: 0.6 });
   const railCount = 100;
   const railMesh = new THREE.InstancedMesh(railGeo, railMat, railCount);
   for (let i = 0; i < railCount; i++) {
@@ -1137,7 +1137,7 @@ function buildParksAndTrees(scene) {
   for (const p of parks) {
     const geo = new THREE.PlaneGeometry(p.w, p.d);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x4CBB17, roughness: 0.9 });
+    const mat = new THREE.MeshLambertMaterial({ color: 0x4CBB17, roughness: 0.9 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(p.x, 0.08, p.z);
     mesh.receiveShadow = true;
@@ -1254,12 +1254,12 @@ function buildStreetLights(scene) {
 
   // Poles
   const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, poleH, 4);
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
   const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, lights.length);
 
   // Bulbs
   const bulbGeo = new THREE.SphereGeometry(0.35, 6, 5);
-  const bulbMat = new THREE.MeshStandardMaterial({
+  const bulbMat = new THREE.MeshLambertMaterial({
     color: 0xFFE4B5, emissive: 0xFFCC88, emissiveIntensity: 1.2,
     roughness: 0.2, transparent: true, opacity: 0.95,
   });
@@ -1325,7 +1325,7 @@ function buildGroundPlane(scene) {
   ctx.globalCompositeOperation = 'source-over';
 
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshLambertMaterial({
     map: tex,
     transparent: true,
     roughness: 0.95,

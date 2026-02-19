@@ -372,7 +372,7 @@ function buildRoads(scene) {
     const minorGeo = new THREE.PlaneGeometry(ROAD_MINOR, CITY_SIZE);
     minorGeo.rotateX(-Math.PI / 2);
     const minorTex = makeRoadTex(ROAD_MINOR, false);
-    const minorMat = new THREE.MeshStandardMaterial({ map: minorTex, roughness: 0.92, metalness: 0 });
+    const minorMat = new THREE.MeshLambertMaterial({ map: minorTex, roughness: 0.92, metalness: 0 });
 
     const dummy = new THREE.Object3D();
     const minorMesh = new THREE.InstancedMesh(minorGeo, minorMat, totalMinor);
@@ -399,7 +399,7 @@ function buildRoads(scene) {
   const majorGeo = new THREE.PlaneGeometry(ROAD_MAJOR, CITY_SIZE);
   majorGeo.rotateX(-Math.PI / 2);
   const majorTex = makeRoadTex(ROAD_MAJOR, true);
-  const majorMat = new THREE.MeshStandardMaterial({ map: majorTex, roughness: 0.92, metalness: 0 });
+  const majorMat = new THREE.MeshLambertMaterial({ map: majorTex, roughness: 0.92, metalness: 0 });
 
   const nsMajor = new THREE.Mesh(majorGeo, majorMat);
   nsMajor.position.set(CITY_CENTER_X, Y, CITY_CENTER_Z);
@@ -536,7 +536,7 @@ function buildBuildings(scene, placements) {
   // ── Concrete buildings ──
   if (concrete.length > 0) {
     const facadeTex = createBuildingFacadeTexture();
-    const mat = new THREE.MeshStandardMaterial({ map: facadeTex, roughness: 0.85, metalness: 0.05 });
+    const mat = new THREE.MeshLambertMaterial({ map: facadeTex, roughness: 0.85, metalness: 0.05 });
     const mesh = new THREE.InstancedMesh(unitBox, mat, concrete.length);
     mesh.receiveShadow = true;
 
@@ -558,7 +558,7 @@ function buildBuildings(scene, placements) {
   // ── Glass towers ──
   if (glass.length > 0) {
     const glassFacadeTex = createGlassFacadeTexture();
-    const glassMat = new THREE.MeshStandardMaterial({
+    const glassMat = new THREE.MeshLambertMaterial({
       map: glassFacadeTex,
       roughness: 0.1,
       metalness: 0.7,
@@ -583,7 +583,7 @@ function buildBuildings(scene, placements) {
 
   // ── Podium bases ──
   if (podiums.length > 0) {
-    const podMat = new THREE.MeshStandardMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
+    const podMat = new THREE.MeshLambertMaterial({ color: 0x8A7A6A, roughness: 0.9, metalness: 0.05 });
     const podMesh = new THREE.InstancedMesh(unitBox, podMat, podiums.length);
     podMesh.receiveShadow = true;
 
@@ -602,7 +602,7 @@ function buildBuildings(scene, placements) {
   // ── Building window glow (night-mode) ──
   {
     const winGeo = new THREE.PlaneGeometry(1.5, 1.0);
-    const winMat = new THREE.MeshStandardMaterial({
+    const winMat = new THREE.MeshLambertMaterial({
       color: 0x000000,
       emissive: 0xFFDD88,
       emissiveIntensity: 0.8,
@@ -673,7 +673,7 @@ function buildRooftopDetails(scene, placements) {
 
   if (roofAC.length > 0) {
     const acGeo = new THREE.BoxGeometry(1, 1, 1);
-    const acMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.8 });
+    const acMat = new THREE.MeshLambertMaterial({ color: 0x555555, roughness: 0.8 });
     const acMesh = new THREE.InstancedMesh(acGeo, acMat, roofAC.length);
 
     for (let i = 0; i < roofAC.length; i++) {
@@ -691,7 +691,7 @@ function buildRooftopDetails(scene, placements) {
 
   if (roofAntennas.length > 0) {
     const antGeo = new THREE.CylinderGeometry(0.15, 0.15, 8, 4);
-    const antMat = new THREE.MeshStandardMaterial({ color: 0x999999, metalness: 0.5, roughness: 0.3 });
+    const antMat = new THREE.MeshLambertMaterial({ color: 0x999999, metalness: 0.5, roughness: 0.3 });
     const antMesh = new THREE.InstancedMesh(antGeo, antMat, roofAntennas.length);
 
     for (let i = 0; i < roofAntennas.length; i++) {
@@ -711,7 +711,7 @@ function buildRooftopDetails(scene, placements) {
     const tallBuildings = placements.buildings.filter(b => b.h > 30);
     if (tallBuildings.length > 0) {
       const obGeo = new THREE.SphereGeometry(0.3, 6, 5);
-      const obMat = new THREE.MeshStandardMaterial({
+      const obMat = new THREE.MeshLambertMaterial({
         color: 0xff0000,
         emissive: 0xff0000,
         emissiveIntensity: 2.0,
@@ -742,7 +742,7 @@ function buildSidewalks(scene, placements) {
 
   const dummy = new THREE.Object3D();
   const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshStandardMaterial({ color: 0x8a8a88, roughness: 0.95, metalness: 0 });
+  const mat = new THREE.MeshLambertMaterial({ color: 0x8a8a88, roughness: 0.95, metalness: 0 });
   const mesh = new THREE.InstancedMesh(geo, mat, sidewalks.length);
   mesh.receiveShadow = true;
 
@@ -770,7 +770,7 @@ function buildParks(scene, placements) {
   for (const pb of parkBlocks) {
     const geo = new THREE.PlaneGeometry(pb.w, pb.d);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x4CBB17, roughness: 0.9 });
+    const mat = new THREE.MeshLambertMaterial({ color: 0x4CBB17, roughness: 0.9 });
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set(pb.x, 0.08, pb.z);
     mesh.receiveShadow = true;
@@ -781,7 +781,7 @@ function buildParks(scene, placements) {
   for (const pb of parkBlocks) {
     const pathGeo = new THREE.PlaneGeometry(2.5, Math.min(pb.w, pb.d) * 0.9);
     pathGeo.rotateX(-Math.PI / 2);
-    const pathMat = new THREE.MeshStandardMaterial({ color: 0x9a9688, roughness: 0.9 });
+    const pathMat = new THREE.MeshLambertMaterial({ color: 0x9a9688, roughness: 0.9 });
     const path = new THREE.Mesh(pathGeo, pathMat);
     path.position.set(pb.x, 0.09, pb.z);
     path.receiveShadow = true;
@@ -820,7 +820,7 @@ function buildParks(scene, placements) {
   if (flowerPositions.length > 0) {
     const flowerGeo = new THREE.PlaneGeometry(1.8, 1.8);
     flowerGeo.rotateX(-Math.PI / 2);
-    const flowerMat = new THREE.MeshStandardMaterial({ roughness: 0.8, metalness: 0 });
+    const flowerMat = new THREE.MeshLambertMaterial({ roughness: 0.8, metalness: 0 });
     const flowerMesh = new THREE.InstancedMesh(flowerGeo, flowerMat, flowerPositions.length);
     flowerMesh.receiveShadow = true;
 
@@ -853,11 +853,11 @@ function buildParks(scene, placements) {
 
   if (treePositions.length > 0) {
     const trunkGeo = new THREE.CylinderGeometry(0.2, 0.3, 3.5, 5);
-    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x5a3a1a, roughness: 0.9 });
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5a3a1a, roughness: 0.9 });
     const trunkMesh = new THREE.InstancedMesh(trunkGeo, trunkMat, treePositions.length);
 
     const canopyGeo = new THREE.SphereGeometry(2.2, 6, 5);
-    const canopyMat = new THREE.MeshStandardMaterial({ roughness: 0.8 });
+    const canopyMat = new THREE.MeshLambertMaterial({ roughness: 0.8 });
     const canopyMesh = new THREE.InstancedMesh(canopyGeo, canopyMat, treePositions.length);
     canopyMesh.receiveShadow = true;
 
@@ -954,12 +954,12 @@ function buildStreetLights(scene) {
 
   // Poles
   const poleGeo = new THREE.CylinderGeometry(0.08, 0.08, poleH, 4);
-  const poleMat = new THREE.MeshStandardMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0x555555, roughness: 0.6, metalness: 0.4 });
   const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, lights.length);
 
   // Warm glow bulbs (#FFE4B5 = Moccasin warm)
   const bulbGeo = new THREE.SphereGeometry(0.35, 6, 5);
-  const bulbMat = new THREE.MeshStandardMaterial({
+  const bulbMat = new THREE.MeshLambertMaterial({
     color: 0xFFE4B5,
     emissive: 0xFFCC88,
     emissiveIntensity: 1.2,
@@ -1037,7 +1037,7 @@ function buildGroundPlane(scene) {
   ctx.globalCompositeOperation = 'source-over';
 
   const tex = new THREE.CanvasTexture(canvas);
-  const mat = new THREE.MeshStandardMaterial({
+  const mat = new THREE.MeshLambertMaterial({
     map: tex,
     transparent: true,
     roughness: 0.95,
