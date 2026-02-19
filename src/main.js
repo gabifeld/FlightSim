@@ -43,6 +43,8 @@ import { initCarSpawn, spawnCar, despawnCar, updateCarVisual, isCarSpawned } fro
 import { createInternationalAirport, createIntlAirportLights, updateIntlAirportLights, setIntlNightMode, isOnIntlRunway, isOnIntlTaxiway } from './internationalAirport.js';
 import { initAircraftAI, updateAircraftAI, resetAircraftAI } from './aircraftAI.js';
 import { initHints, updateHints, resetHints } from './hints.js';
+import { initSpeedLines, updateSpeedLines } from './speedLines.js';
+import { getCameraMode } from './camera.js';
 
 // Init settings (localStorage persistence)
 initSettings();
@@ -60,6 +62,8 @@ setLoadProgress(5, 'Initializing...');
 const container = document.getElementById('app');
 initScene(container);
 const camera = initCamera();
+initSpeedLines(camera);
+scene.add(camera); // camera must be in scene for speed lines child to render
 initHUD();
 initWeather();
 
@@ -295,6 +299,9 @@ function gameLoop(time) {
 
     // Particles
     updateParticles(dt);
+
+    // Speed lines overlay
+    updateSpeedLines(getActiveVehicle().speed, getCameraMode(), dt);
 
     // AI ground vehicles (always update)
     updateGroundVehicleAI(dt);
