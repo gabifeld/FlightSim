@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { Water } from 'three/addons/objects/Water.js';
 import { SimplexNoise } from 'three/addons/math/SimplexNoise.js';
 import {
   TERRAIN_SIZE,
@@ -30,7 +29,7 @@ import {
   INTL_RUNWAY_WIDTH,
 } from './constants.js';
 import { smoothstep } from './utils.js';
-import { getSunDirection } from './scene.js';
+import { getSunDirection, scene as sceneRef } from './scene.js';
 import { getSetting, isSettingExplicit } from './settings.js';
 
 const simplex = new SimplexNoise();
@@ -1804,90 +1803,74 @@ export function applyWeatherCloudProfile(profile) {
   applyCloudDensity();
 }
 
-// Water using Three.js Water addon
+// Stylized water with custom shader
 let water;
+let waterMat;
 
-function createWaterNormalMap() {
-  const size = 512;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const imageData = ctx.createImageData(size, size);
-  const data = imageData.data;
+export function createWater(sceneRef) {
+  const waterGeo = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, 128, 128);
+  waterGeo.rotateX(-Math.PI / 2);
 
-  // Generate a proper tangent-space normal map with multi-octave waves
-  const step = 1.0 / size;
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      const u = x * step;
-      const v = y * step;
-
-      // Height function at (u,v) — 5 octaves of sine waves
-      const h = (ux, uy) => {
-        const a = ux * Math.PI * 8;
-        const b = uy * Math.PI * 8;
-        return Math.sin(a + b * 0.5) * 0.5
-             + Math.sin(a * 2.3 - b * 1.7) * 0.3
-             + Math.sin(a * 0.7 + b * 3.1) * 0.2
-             + Math.sin(a * 3.7 + b * 0.9) * 0.15
-             + Math.sin(a * 1.5 - b * 4.3) * 0.1;
-      };
-
-      // Finite difference normals
-      const eps = step * 0.5;
-      const dhdx = (h(u + eps, v) - h(u - eps, v)) / (2 * eps);
-      const dhdy = (h(u, v + eps) - h(u, v - eps)) / (2 * eps);
-
-      // Tangent-space normal: (-dhdx, -dhdy, 1) normalized, then mapped to [0,255]
-      const scale = 0.08; // controls normal map strength
-      const nx = -dhdx * scale;
-      const ny = -dhdy * scale;
-      const nz = 1.0;
-      const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
-
-      const idx = (y * size + x) * 4;
-      data[idx]     = Math.floor(((nx / len) * 0.5 + 0.5) * 255); // R
-      data[idx + 1] = Math.floor(((ny / len) * 0.5 + 0.5) * 255); // G
-      data[idx + 2] = Math.floor(((nz / len) * 0.5 + 0.5) * 255); // B
-      data[idx + 3] = 255;
-    }
-  }
-
-  ctx.putImageData(imageData, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.wrapS = THREE.RepeatWrapping;
-  tex.wrapT = THREE.RepeatWrapping;
-  return tex;
-}
-
-export function createWater(scene) {
-  const waterGeometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE);
-
-  const waterNormals = createWaterNormalMap();
-
-  water = new Water(waterGeometry, {
-    textureWidth: 512,
-    textureHeight: 512,
-    waterNormals: waterNormals,
-    sunDirection: getSunDirection(),
-    sunColor: 0xffffff,
-    waterColor: 0x001e0f,
-    distortionScale: 3.7,
-    fog: scene.fog !== undefined,
+  waterMat = new THREE.ShaderMaterial({
+    uniforms: {
+      time: { value: 0 },
+      shallowColor: { value: new THREE.Color(0.15, 0.65, 0.65) },
+      deepColor: { value: new THREE.Color(0.05, 0.2, 0.4) },
+      cameraPos: { value: new THREE.Vector3() },
+      fogColor: { value: new THREE.Color() },
+      fogDensity: { value: 0.00004 },
+    },
+    vertexShader: `
+      uniform float time;
+      varying vec3 vWorldPos;
+      varying float vWaveHeight;
+      void main() {
+        vec3 pos = position;
+        float wave = sin(pos.x * 0.02 + time) * cos(pos.z * 0.015 + time * 0.7) * 1.5;
+        wave += sin(pos.x * 0.035 - time * 0.8) * cos(pos.z * 0.025 + time * 0.5) * 0.8;
+        pos.y += wave;
+        vWaveHeight = wave;
+        vWorldPos = (modelMatrix * vec4(pos, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 shallowColor, deepColor, cameraPos, fogColor;
+      uniform float fogDensity;
+      varying vec3 vWorldPos;
+      varying float vWaveHeight;
+      void main() {
+        vec3 viewDir = normalize(cameraPos - vWorldPos);
+        float fresnel = pow(1.0 - max(dot(viewDir, vec3(0.0, 1.0, 0.0)), 0.0), 3.0);
+        vec3 water = mix(shallowColor, deepColor, fresnel);
+        // Foam highlights on wave peaks
+        water += vec3(0.15) * smoothstep(0.3, 1.5, vWaveHeight);
+        // Fog integration
+        float dist = length(vWorldPos - cameraPos);
+        float fogFactor = 1.0 - exp(-fogDensity * dist * dist);
+        water = mix(water, fogColor, fogFactor);
+        gl_FragColor = vec4(water, 0.9);
+      }
+    `,
+    transparent: true,
+    depthWrite: false,
   });
 
-  water.rotation.x = -Math.PI / 2;
+  water = new THREE.Mesh(waterGeo, waterMat);
   water.position.y = -2;
-  scene.add(water);
+  sceneRef.add(water);
   return water;
 }
 
-export function updateWater(dt, windVector) {
-  if (!water) return;
+export function updateWater(dt, windVector, camera) {
+  if (!waterMat) return;
   const windSpeed = windVector ? Math.hypot(windVector.x, windVector.z) : 0;
-  const timeScale = 1.0 + Math.min(1.2, windSpeed * 0.04);
-  water.material.uniforms['time'].value += dt * timeScale;
-  water.material.uniforms['sunDirection'].value.copy(getSunDirection());
-  water.material.uniforms['distortionScale'].value = 3.2 + Math.min(3.8, windSpeed * 0.24);
+  const timeScale = 0.5 + Math.min(0.6, windSpeed * 0.02);
+  waterMat.uniforms.time.value += dt * timeScale;
+  if (camera) {
+    waterMat.uniforms.cameraPos.value.copy(camera.position);
+  }
+  if (sceneRef && sceneRef.fog) {
+    waterMat.uniforms.fogColor.value.copy(sceneRef.fog.color);
+  }
 }
