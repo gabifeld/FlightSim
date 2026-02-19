@@ -35,6 +35,25 @@ export const GRAPHICS_QUALITY_PRESETS = Object.freeze({
   }),
 });
 
+/**
+ * Run a quick GPU benchmark: render 120 frames and measure average FPS.
+ * Returns 'high', 'medium', or 'low'.
+ */
+export function runBenchmark(renderer, scene, camera) {
+  const FRAMES = 120;
+  const start = performance.now();
+  for (let i = 0; i < FRAMES; i++) {
+    renderer.render(scene, camera);
+  }
+  renderer.getContext().finish(); // force GPU sync
+  const elapsed = performance.now() - start;
+  const avgFps = (FRAMES / elapsed) * 1000;
+
+  if (avgFps >= 55) return 'high';
+  if (avgFps >= 30) return 'medium';
+  return 'low';
+}
+
 export function applyGraphicsQuality(level) {
   const quality = GRAPHICS_QUALITY_PRESETS[level] ? level : 'high';
   const preset = GRAPHICS_QUALITY_PRESETS[quality];
