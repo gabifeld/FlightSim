@@ -24,6 +24,10 @@ import {
   TABLE_MTN_Z,
   SIGNAL_HILL_X,
   SIGNAL_HILL_Z,
+  INTL_AIRPORT_X,
+  INTL_AIRPORT_Z,
+  INTL_RUNWAY_LENGTH,
+  INTL_RUNWAY_WIDTH,
 } from './constants.js';
 import { smoothstep } from './utils.js';
 import { getSunDirection } from './scene.js';
@@ -187,6 +191,17 @@ function signalHillHeight(x, z) {
   return h * Math.exp(-distSq / (2 * rSq * 0.18));
 }
 
+// International airport flatten — large rectangular zone for E-W runways
+function intlAirportFlattenFactor(x, z) {
+  const halfW = 2000; // 4000m total width (E-W, along runway length)
+  const halfD = 1000; // 2000m total depth (N-S, covers both runways + terminals)
+  const margin = 400;
+  const dx = Math.max(0, Math.abs(x - INTL_AIRPORT_X) - halfW);
+  const dz = Math.max(0, Math.abs(z - INTL_AIRPORT_Z) - halfD);
+  const dist = Math.sqrt(dx * dx + dz * dz);
+  return 1 - smoothstep(0, margin, dist);
+}
+
 function runwayFlattenFactor(x, z) {
   // Airport 1 at origin
   const f1 = airportFlattenFactor(x, z, 0, 0);
@@ -195,7 +210,9 @@ function runwayFlattenFactor(x, z) {
   const f3 = cityFlattenFactor(x, z);
   const f4 = highwayFlattenFactor(x, z);
   const f5 = capeTownFlattenFactor(x, z);
-  return Math.max(f1, f2, f3, f4, f5);
+  // International airport
+  const f6 = intlAirportFlattenFactor(x, z);
+  return Math.max(f1, f2, f3, f4, f5, f6);
 }
 
 // Ocean depression — creates coastline along eastern edge of map
@@ -228,10 +245,51 @@ export function isInOcean(x, z) {
   return oceanFactor(x, z) > 0.5;
 }
 
+// ── Terrain height cache (Float32Array for fast bilinear lookups) ──
+const CACHE_RES = TERRAIN_SEGMENTS; // 384x384 grid
+let heightCache = null;
+
+export function buildTerrainHeightCache() {
+  heightCache = new Float32Array(CACHE_RES * CACHE_RES);
+  const halfSize = TERRAIN_SIZE / 2;
+  const step = TERRAIN_SIZE / CACHE_RES;
+  for (let row = 0; row < CACHE_RES; row++) {
+    const z = -halfSize + (row + 0.5) * step;
+    for (let col = 0; col < CACHE_RES; col++) {
+      const x = -halfSize + (col + 0.5) * step;
+      heightCache[row * CACHE_RES + col] = getTerrainHeight(x, z);
+    }
+  }
+}
+
+export function getTerrainHeightCached(x, z) {
+  if (!heightCache) return getTerrainHeight(x, z);
+  const halfSize = TERRAIN_SIZE / 2;
+  // Convert world coords to grid coords (continuous)
+  const gx = ((x + halfSize) / TERRAIN_SIZE) * CACHE_RES - 0.5;
+  const gz = ((z + halfSize) / TERRAIN_SIZE) * CACHE_RES - 0.5;
+  const ix = Math.floor(gx);
+  const iz = Math.floor(gz);
+  const fx = gx - ix;
+  const fz = gz - iz;
+  // Clamp to grid bounds
+  const x0 = Math.max(0, Math.min(CACHE_RES - 1, ix));
+  const x1 = Math.max(0, Math.min(CACHE_RES - 1, ix + 1));
+  const z0 = Math.max(0, Math.min(CACHE_RES - 1, iz));
+  const z1 = Math.max(0, Math.min(CACHE_RES - 1, iz + 1));
+  // Bilinear interpolation
+  const h00 = heightCache[z0 * CACHE_RES + x0];
+  const h10 = heightCache[z0 * CACHE_RES + x1];
+  const h01 = heightCache[z1 * CACHE_RES + x0];
+  const h11 = heightCache[z1 * CACHE_RES + x1];
+  return (h00 * (1 - fx) * (1 - fz) + h10 * fx * (1 - fz) +
+          h01 * (1 - fx) * fz + h11 * fx * fz);
+}
+
 // Ground level for physics — terrain or water surface, whichever is higher
 const WATER_SURFACE_Y = -2;
 export function getGroundLevel(x, z) {
-  return Math.max(getTerrainHeight(x, z), WATER_SURFACE_Y);
+  return Math.max(getTerrainHeightCached(x, z), WATER_SURFACE_Y);
 }
 
 function createGrassTexture() {
@@ -360,15 +418,9 @@ function createRockTexture() {
   return tex;
 }
 
-function applyBiomeTerrainShader(material, dirtMap, rockMap) {
-  material.customProgramCacheKey = () => 'terrain-biome-v3';
+function applyBiomeTerrainShader(material) {
+  material.customProgramCacheKey = () => 'terrain-biome-v4-stepped';
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.dirtMap = { value: dirtMap };
-    shader.uniforms.rockMap = { value: rockMap };
-    shader.uniforms.shoreLevel = { value: 2.4 };
-    shader.uniforms.shoreFade = { value: 4.8 };
-    shader.uniforms.biomeNoiseScale = { value: 0.0017 };
-
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -387,60 +439,35 @@ vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
       .replace(
         '#include <common>',
         `#include <common>
-uniform sampler2D dirtMap;
-uniform sampler2D rockMap;
-uniform float shoreLevel;
-uniform float shoreFade;
-uniform float biomeNoiseScale;
 varying vec3 vWorldPos;
-varying vec3 vWorldNormal;
-
-float hash21(vec2 p) {
-  p = fract(p * vec2(123.34, 456.21));
-  p += dot(p, p + 34.45);
-  return fract(p.x * p.y);
-}`
+varying vec3 vWorldNormal;`
       )
       .replace(
         '#include <map_fragment>',
-        `vec4 sampledDiffuseColor = texture2D(map, vMapUv);
-vec4 dirtColor = texture2D(dirtMap, vMapUv * 1.25);
-vec4 rockColor = texture2D(rockMap, vMapUv * 1.65);
+        `// Stylized stepped elevation bands
+vec3 sandColor = vec3(0.76, 0.70, 0.50);
+vec3 grassColor = vec3(0.40, 0.65, 0.30);
+vec3 darkGrassColor = vec3(0.25, 0.45, 0.20);
+vec3 rockColor = vec3(0.50, 0.48, 0.45);
+vec3 snowColor = vec3(0.95, 0.95, 0.97);
 
 float h = vWorldPos.y;
-float slope = clamp(1.0 - abs(vWorldNormal.y), 0.0, 1.0);
-float shore = 1.0 - smoothstep(shoreLevel, shoreLevel + shoreFade, h);
-float lowland = 1.0 - smoothstep(120.0, 250.0, h);
-float highland = smoothstep(170.0, 300.0, h);
-float steepRock = smoothstep(0.52, 0.90, slope);
-float rockWeight = clamp(max(highland * 0.9, steepRock * 0.95), 0.0, 1.0);
-float dirtWeight = clamp(smoothstep(0.28, 0.62, slope) * (1.0 - rockWeight * 0.75) + shore * 0.3, 0.0, 1.0);
-float grassWeight = clamp(1.0 - rockWeight - dirtWeight, 0.0, 1.0);
+vec3 terrainColor = sandColor;
+terrainColor = mix(terrainColor, grassColor, smoothstep(2.0, 8.0, h));
+terrainColor = mix(terrainColor, darkGrassColor, smoothstep(40.0, 60.0, h));
+terrainColor = mix(terrainColor, rockColor, smoothstep(120.0, 150.0, h));
+terrainColor = mix(terrainColor, snowColor, smoothstep(300.0, 340.0, h));
 
-float n = hash21(floor(vWorldPos.xz * biomeNoiseScale));
-grassWeight *= mix(0.95, 1.18, n) * (0.9 + 0.22 * lowland);
-dirtWeight *= mix(0.82, 1.05, 1.0 - n);
-rockWeight *= mix(0.88, 1.12, n * n);
-float total = max(0.001, grassWeight + dirtWeight + rockWeight);
-grassWeight /= total;
-dirtWeight /= total;
-rockWeight /= total;
+// Steep slopes -> rock
+float slope = 1.0 - vWorldNormal.y;
+terrainColor = mix(terrainColor, rockColor, smoothstep(0.3, 0.6, slope));
 
-vec3 terrainColor = sampledDiffuseColor.rgb * grassWeight +
-  dirtColor.rgb * dirtWeight +
-  rockColor.rgb * rockWeight;
+// Shore wetness: darken near y=0
+float shore = 1.0 - smoothstep(0.0, 5.0, h);
+vec3 wetColor = terrainColor * vec3(0.7, 0.75, 0.8);
+terrainColor = mix(terrainColor, wetColor, shore * 0.5);
 
-vec3 wetColor = terrainColor * vec3(0.72, 0.77, 0.81);
-terrainColor = mix(terrainColor, wetColor, shore * 0.45);
-
-float foamNoise = hash21(floor(vWorldPos.xz * 0.09 + vec2(17.0, 53.0)));
-float foam = smoothstep(0.82, 1.0, shore) * (0.2 + 0.8 * foamNoise);
-terrainColor = mix(terrainColor, vec3(0.88, 0.84, 0.73), foam * 0.08);
-
-float greenBoost = lowland * 0.12;
-terrainColor *= vec3(0.98 - greenBoost * 0.15, 1.0 + greenBoost, 0.97 - greenBoost * 0.2);
-
-diffuseColor *= vec4(terrainColor, sampledDiffuseColor.a);`
+diffuseColor = vec4(terrainColor, 1.0);`
       );
   };
 }
@@ -513,19 +540,15 @@ export function createTerrain() {
   }
   geometry.computeVertexNormals();
 
-  const grassTex = createGrassTexture();
-  const dirtTex = createDirtTexture();
-  const rockTex = createRockTexture();
   const normalMap = createTerrainNormalMap(1);
 
   const material = new THREE.MeshStandardMaterial({
-    map: grassTex,
     normalMap: normalMap,
     normalScale: new THREE.Vector2(0.24, 0.24),
     roughness: 0.88,
     metalness: 0.0,
   });
-  applyBiomeTerrainShader(material, dirtTex, rockTex);
+  applyBiomeTerrainShader(material);
 
   const mesh = new THREE.Mesh(geometry, material);
   mesh.receiveShadow = true;
