@@ -10,13 +10,15 @@ import {
   isAPEngaged,
 } from './autopilot.js';
 import { cycleWeatherPreset } from './weatherFx.js';
-import { toggleILS } from './hud.js';
+import { toggleILS, cycleHudMode } from './hud.js';
 import { toggleLandingAssist } from './landing.js';
 import { cycleCloudDensity } from './terrain.js';
 import { toggleReplay, isReplayPlaying, scrubReplay, setReplaySpeed, getReplayState } from './replay.js';
 import { startCrosswind, startDaily, startEngineOut, startSpeedrun, resetChallenge } from './challenges.js';
 import { updateGamepad, getButtonJustPressed, isGamepadConnected } from './gamepad.js';
 import { togglePause, isPaused, isMenuOpen, onGameStart } from './menu.js';
+import { getSetting, setSetting } from './settings.js';
+import { showMessage } from './hud.js';
 
 const keys = {};
 let cameraToggleCallback = null;
@@ -28,9 +30,9 @@ let carDespawnCallback = null;
 // Keys used by the sim
 const SIM_KEYS = new Set([
   'w', 's', 'a', 'd', 'q', 'e', 'g', 'f', 'b', 'v', 'r', ' ',
-  '1', '2', '3', '4',
-  'l', 't', 'p', 'c', 'z', 'h', 'j', 'n', 'm', '=',
-  '[', ']', '+', '-', 'i', 'k',
+  '1', '2', '3', '4', '5',
+  'l', 't', 'p', 'c', 'z', 'h', 'j', 'n', 'm', '=', 'u',
+  '[', ']', '+', '-', 'i', 'k', 'x',
 ]);
 
 const AIRCRAFT_MAP = {
@@ -157,9 +159,24 @@ export function initControls() {
         cycleWeatherPreset();
       }
 
+      // Toggle unlimited fuel
+      if (mapped === 'u') {
+        const current = getSetting('unlimitedFuel');
+        setSetting('unlimitedFuel', !current);
+        showMessage('Unlimited Fuel: ' + (!current ? 'ON' : 'OFF'));
+        setTimeout(() => showMessage(''), 2000);
+      }
+
       // Cloud density cycle
       if (mapped === 'c') {
         cycleCloudDensity();
+      }
+
+      // HUD mode cycle
+      if (mapped === 'x') {
+        const mode = cycleHudMode();
+        showMessage('HUD: ' + mode.toUpperCase());
+        setTimeout(() => showMessage(''), 1500);
       }
 
       // ILS toggle (aircraft only)

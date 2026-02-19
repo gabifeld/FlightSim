@@ -18,7 +18,8 @@ import {
   CITY_CENTER_X, CITY_CENTER_Z, CITY_SIZE,
 } from './constants.js';
 import { getRoadNetwork } from './city.js';
-import { getTerrainHeight, getCloudDensity } from './terrain.js';
+import { getTerrainHeightCached, getCloudDensity } from './terrain.js';
+import { getSetting, setSetting } from './settings.js';
 import { radToDeg } from './utils.js';
 
 let els = {};
@@ -30,8 +31,16 @@ let lastMinimapUpdateMs = 0;
 let cachedRoadNetwork = null;
 let cachedTaxiNetwork = null;
 
+// HUD mode: 'full' | 'minimal' | 'off'
+let hudMode = 'full';
+
+// Speed tape
+let speedTapeBuilt = false;
+
 export function initHUD() {
   els = {
+    hudRoot: document.getElementById('hud'),
+    controlsHelp: document.getElementById('controls-help-wrap'),
     speed: document.getElementById('hud-speed'),
     altitude: document.getElementById('hud-altitude'),
     vspeed: document.getElementById('hud-vspeed'),
@@ -49,6 +58,7 @@ export function initHUD() {
     gforce: document.getElementById('hud-gforce'),
     stallWarning: document.getElementById('hud-stall-warning'),
     wind: document.getElementById('hud-wind'),
+    fuel: document.getElementById('hud-fuel'),
     aircraftName: document.getElementById('hud-aircraft-name'),
     taxiIndicator: document.getElementById('hud-taxi'),
     // AP panel
@@ -92,6 +102,10 @@ export function initHUD() {
     speedrunTimer: document.getElementById('speedrun-timer'),
     speedrunTime: document.getElementById('speedrun-time'),
     engineFailWarning: document.getElementById('engine-fail-warning'),
+    // Speed tape
+    speedTapeStrip: document.getElementById('speed-tape-strip'),
+    speedTapeCurrent: document.getElementById('speed-tape-current'),
+    speedTapeContainer: document.getElementById('speed-tape'),
   };
 
   const minimapCanvas = document.getElementById('minimap-canvas');
@@ -107,12 +121,88 @@ export function initHUD() {
     cachedTaxiNetwork = getTaxiwayNetwork();
     cachedRoadNetwork = getRoadNetwork();
   }
+
+  // Pre-create landing assist indicator
+  const hudContainer = document.getElementById('hud');
+  if (hudContainer) {
+    const assistEl = document.createElement('div');
+    assistEl.id = 'hud-landing-assist';
+    assistEl.className = 'landing-assist-indicator';
+    assistEl.textContent = 'LAND ASSIST';
+    assistEl.style.display = 'none';
+    hudContainer.appendChild(assistEl);
+    els.landingAssist = assistEl;
+  }
+
+  // Build speed tape ticks
+  buildSpeedTape();
+
+  // Restore HUD mode from settings
+  hudMode = getSetting('hudMode') || 'full';
+  applyHudMode();
+}
+
+function buildSpeedTape() {
+  const strip = els.speedTapeStrip;
+  if (!strip || speedTapeBuilt) return;
+  speedTapeBuilt = true;
+
+  // Build ticks from 0 to 600kt, each tick every 10kt
+  // Each tick is 24px tall
+  const tickHeight = 24;
+  const maxSpeed = 600;
+  const tickCount = maxSpeed / 10;
+
+  for (let i = 0; i <= tickCount; i++) {
+    const speed = i * 10;
+    const tick = document.createElement('div');
+    tick.className = 'speed-tape-tick' + (speed % 50 === 0 ? ' major' : '');
+    tick.style.top = ((tickCount - i) * tickHeight) + 'px';
+    tick.textContent = speed % 50 === 0 ? speed : '';
+    strip.appendChild(tick);
+  }
+
+  strip.style.height = ((tickCount + 1) * tickHeight) + 'px';
+}
+
+function updateSpeedTape(speedKts) {
+  if (!els.speedTapeStrip) return;
+  const tickHeight = 24;
+  const maxSpeed = 600;
+  const tickCount = maxSpeed / 10;
+
+  // Center the strip so current speed aligns with pointer (at 50% height)
+  const containerHeight = 240;
+  const speedPos = ((maxSpeed - speedKts) / 10) * tickHeight;
+  const offset = speedPos - containerHeight / 2 + tickHeight / 2;
+  els.speedTapeStrip.style.transform = `translateY(${-offset}px)`;
+
+  if (els.speedTapeCurrent) {
+    els.speedTapeCurrent.textContent = Math.round(speedKts);
+  }
+}
+
+function applyHudMode() {
+  const hudEl = els.hudRoot;
+  if (!hudEl) return;
+  hudEl.classList.remove('hud-minimal', 'hud-off');
+  if (hudMode === 'minimal') hudEl.classList.add('hud-minimal');
+  else if (hudMode === 'off') hudEl.classList.add('hud-off');
+}
+
+export function cycleHudMode() {
+  if (hudMode === 'full') hudMode = 'minimal';
+  else if (hudMode === 'minimal') hudMode = 'off';
+  else hudMode = 'full';
+  setSetting('hudMode', hudMode);
+  applyHudMode();
+  return hudMode;
 }
 
 export function updateHUD(flightState) {
   // Hide HUD when menu is open
-  const hudEl = document.getElementById('hud');
-  const helpEl = document.getElementById('controls-help');
+  const hudEl = els.hudRoot;
+  const helpEl = els.controlsHelp;
   if (isMenuOpen()) {
     if (hudEl) hudEl.style.opacity = '0';
     if (helpEl) helpEl.style.opacity = '0';
@@ -127,10 +217,14 @@ export function updateHUD(flightState) {
   const isAircraftVehicle = isAircraft(state);
 
   // Flight data
-  if (els.speed) els.speed.textContent = Math.round(state.speed * MS_TO_KNOTS);
+  const speedKts = Math.round(state.speed * MS_TO_KNOTS);
+  if (els.speed) els.speed.textContent = speedKts;
   if (els.altitude) els.altitude.textContent = Math.round(state.altitude * M_TO_FEET);
 
   if (els.heading) els.heading.textContent = String(Math.round(state.heading)).padStart(3, '0');
+
+  // Speed tape
+  updateSpeedTape(speedKts);
 
   // Throttle
   const thrPct = Math.round(state.throttle * 100);
@@ -221,6 +315,32 @@ export function updateHUD(flightState) {
     }
   }
 
+  // Fuel indicator
+  if (els.fuel) {
+    if (getSetting('unlimitedFuel')) {
+      els.fuel.textContent = 'UNLIMITED';
+      els.fuel.className = 'sys-status on';
+    } else if (isAircraftVehicle && state.fuel !== undefined) {
+      const pct = Math.round(state.fuel * 100);
+      if (state.fuel <= 0) {
+        els.fuel.textContent = 'EMPTY';
+        els.fuel.className = 'sys-status active';
+      } else if (pct <= 20) {
+        els.fuel.textContent = pct + '%';
+        els.fuel.className = 'sys-status active';
+      } else if (pct <= 50) {
+        els.fuel.textContent = pct + '%';
+        els.fuel.className = 'sys-status warn';
+      } else {
+        els.fuel.textContent = pct + '%';
+        els.fuel.className = 'sys-status on';
+      }
+    } else {
+      els.fuel.textContent = '--';
+      els.fuel.className = 'sys-status off';
+    }
+  }
+
   // Lights indicator
   if (els.lightsIndicator) {
     const lightsOn = isAircraftVehicle ? state.landingLight : state.headlights;
@@ -233,18 +353,8 @@ export function updateHUD(flightState) {
   else if (els.apPanel) els.apPanel.style.display = 'none';
 
   // Landing assist indicator (aircraft only)
-  let assistEl = document.getElementById('hud-landing-assist');
-  if (isLandingAssistActive()) {
-    if (!assistEl) {
-      assistEl = document.createElement('div');
-      assistEl.id = 'hud-landing-assist';
-      assistEl.className = 'landing-assist-indicator';
-      assistEl.textContent = 'LAND ASSIST';
-      document.getElementById('hud').appendChild(assistEl);
-    }
-    assistEl.style.display = 'block';
-  } else if (assistEl) {
-    assistEl.style.display = 'none';
+  if (els.landingAssist) {
+    els.landingAssist.style.display = isLandingAssistActive() ? 'block' : 'none';
   }
 
   // Time display
@@ -510,16 +620,32 @@ export function showLandingScore(score) {
 
   if (els.scoreGrade) {
     els.scoreGrade.textContent = score.overall.grade;
-    els.scoreGrade.className = 'score-grade grade-' + score.overall.grade.toLowerCase();
+    els.scoreGrade.className = 'score-grade grade-' + score.overall.grade.toLowerCase() + ' score-grade-animated';
   }
   if (els.scoreTotal) els.scoreTotal.textContent = score.overall.score + '/100';
-  if (els.scoreVs) els.scoreVs.textContent = `${score.vs.value} FPM - ${score.vs.grade}`;
-  if (els.scoreCl) els.scoreCl.textContent = `${score.centerline.value}m - ${score.centerline.grade}`;
-  if (els.scoreTz) els.scoreTz.textContent = `${score.touchdownZone.value}m - ${score.touchdownZone.grade}`;
-  if (els.scoreSpeed) els.scoreSpeed.textContent = `${score.speed.value} KTS`;
+
+  // Animated score rows — fill sequentially
+  const rows = [els.scoreVs, els.scoreCl, els.scoreTz, els.scoreSpeed];
+  const texts = [
+    `${score.vs.value} FPM - ${score.vs.grade}`,
+    `${score.centerline.value}m - ${score.centerline.grade}`,
+    `${score.touchdownZone.value}m - ${score.touchdownZone.grade}`,
+    `${score.speed.value} KTS`,
+  ];
+  rows.forEach((el, i) => {
+    if (!el) return;
+    el.textContent = texts[i];
+    const row = el.closest('.score-row');
+    if (row) {
+      row.classList.remove('score-row-animated');
+      void row.offsetWidth; // force reflow
+      row.classList.add('score-row-animated');
+      row.style.animationDelay = (i * 0.15) + 's';
+    }
+  });
   if (els.scoreBest) {
     els.scoreBest.textContent = score.newBest ? 'NEW BEST!' : `BEST: ${score.bestScore}`;
-    els.scoreBest.className = 'score-best' + (score.newBest ? ' new-best' : '');
+    els.scoreBest.className = 'score-best' + (score.newBest ? ' new-best score-best-pulse' : '');
   }
 }
 
@@ -541,7 +667,7 @@ function renderTerrainImage() {
     for (let x = 0; x < size; x++) {
       const wx = (x / size - 0.5) * worldRange;
       const wz = (y / size - 0.5) * worldRange;
-      const h = getTerrainHeight(wx, wz);
+      const h = getTerrainHeightCached(wx, wz);
       const idx = (y * size + x) * 4;
 
       if (h < 0.5) {

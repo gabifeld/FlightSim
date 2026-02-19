@@ -19,6 +19,8 @@ const defaults = {
   mapboxApiKey: '',
   gpwsEnabled: true,
   autoCycleTime: false,
+  unlimitedFuel: true,
+  hudMode: 'full', // 'full', 'minimal', 'off'
 };
 
 let settings = { ...defaults };
