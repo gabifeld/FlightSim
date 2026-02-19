@@ -8,11 +8,15 @@ let tireSmoke = null;
 let dustCloud = null;
 let exhaustLeft = null;
 let exhaustRight = null;
+let wingVapor = null;
+let contrails = null;
 let sceneRef = null;
 
 const MAX_TIRE_PARTICLES = 200;
 const MAX_DUST_PARTICLES = 100;
 const MAX_EXHAUST_PARTICLES = 50;
+const MAX_WING_VAPOR = 100;
+const MAX_CONTRAIL_PARTICLES = 200;
 
 // Pre-allocated vectors for exhaust calculations (avoid per-frame allocation)
 const _fwd = new THREE.Vector3();
@@ -158,14 +162,18 @@ export function initParticles(scene) {
   sceneRef = scene;
 
   tireSmoke = createParticleSystem(MAX_TIRE_PARTICLES, 0xcccccc, 3, 0.5, THREE.NormalBlending);
-  dustCloud = createParticleSystem(MAX_DUST_PARTICLES, 0xaa8855, 4, 0.4, THREE.NormalBlending);
+  dustCloud = createParticleSystem(MAX_DUST_PARTICLES, 0xaa8855, 6, 0.4, THREE.NormalBlending);
   exhaustLeft = createParticleSystem(MAX_EXHAUST_PARTICLES, 0xff6600, 1.5, 0.3, THREE.AdditiveBlending);
   exhaustRight = createParticleSystem(MAX_EXHAUST_PARTICLES, 0xff6600, 1.5, 0.3, THREE.AdditiveBlending);
+  wingVapor = createParticleSystem(MAX_WING_VAPOR, 0xffffff, 2, 0.5, THREE.NormalBlending);
+  contrails = createParticleSystem(MAX_CONTRAIL_PARTICLES, 0xffffff, 3, 0.4, THREE.NormalBlending);
 
   scene.add(tireSmoke.points);
   scene.add(dustCloud.points);
   scene.add(exhaustLeft.points);
   scene.add(exhaustRight.points);
+  scene.add(wingVapor.points);
+  scene.add(contrails.points);
 }
 
 export function triggerTireSmoke(intensity) {
@@ -177,9 +185,16 @@ export function triggerTireSmoke(intensity) {
 
 export function triggerDustCloud(intensity) {
   if (!dustCloud) return;
-  const pos = getActiveVehicle().position;
-  const count = Math.min(Math.floor(intensity * 20), 30);
-  emitParticles(dustCloud, count, pos.x, pos.y - 1, pos.z, 2 + intensity, 2.5, [2, 5]);
+  const v = getActiveVehicle();
+  const pos = v.position;
+  const type = getAircraftType(v.currentType);
+  const spread = type ? type.wingSpan * 0.3 : 5;
+  const count = Math.min(Math.floor(intensity * 25), 30);
+  // Spread particles across aircraft width
+  for (let i = 0; i < count; i++) {
+    const ox = (Math.random() - 0.5) * spread * 2;
+    emitParticles(dustCloud, 1, pos.x + ox, pos.y - 1, pos.z, 3 + intensity * 2, 1.0, [5, 8]);
+  }
 }
 
 export function updateParticles(dt) {
@@ -187,22 +202,26 @@ export function updateParticles(dt) {
   if (dustCloud) updateParticleSystem(dustCloud, dt);
   if (exhaustLeft) updateParticleSystem(exhaustLeft, dt);
   if (exhaustRight) updateParticleSystem(exhaustRight, dt);
+  if (wingVapor) updateParticleSystem(wingVapor, dt);
+  if (contrails) updateParticleSystem(contrails, dt);
+
+  const v = getActiveVehicle();
+  if (!isAircraft(v)) return;
+
+  const type = getAircraftType(v.currentType);
+  const pos = v.position;
+  _fwd.set(0, 0, 1).applyQuaternion(v.quaternion);
+  _right.set(1, 0, 0).applyQuaternion(v.quaternion);
 
   // Engine exhaust - continuous when throttle > 70%
-  if (getActiveVehicle().throttle > 0.7 && !getActiveVehicle().onGround) {
-    const type = getAircraftType(getActiveVehicle().currentType);
-    const pos = getActiveVehicle().position;
-    _fwd.set(0, 0, 1).applyQuaternion(getActiveVehicle().quaternion);
-    _right.set(1, 0, 0).applyQuaternion(getActiveVehicle().quaternion);
-
+  if (v.throttle > 0.7 && !v.onGround) {
     const exhaustOffset = type.fuselageLength * 0.5;
     _basePos.copy(pos).addScaledVector(_fwd, exhaustOffset);
 
     if (type.type === 'fighter') {
-      // Single engine exhaust
       if (exhaustLeft) {
         emitParticles(exhaustLeft, 2, _basePos.x, _basePos.y, _basePos.z,
-          2 + getActiveVehicle().throttle * 3, 0.5, [0.5, 2]);
+          2 + v.throttle * 3, 0.5, [0.5, 2]);
       }
     } else if (type.engineCount >= 2) {
       const nacSpacing = type.wingSpan * 0.28;
@@ -211,12 +230,39 @@ export function updateParticles(dt) {
 
       if (exhaustLeft) {
         emitParticles(exhaustLeft, 1, _leftPos.x, _leftPos.y, _leftPos.z,
-          1 + getActiveVehicle().throttle * 2, 0.4, [0.3, 1.5]);
+          1 + v.throttle * 2, 0.4, [0.3, 1.5]);
       }
       if (exhaustRight) {
         emitParticles(exhaustRight, 1, _rightPos.x, _rightPos.y, _rightPos.z,
-          1 + getActiveVehicle().throttle * 2, 0.4, [0.3, 1.5]);
+          1 + v.throttle * 2, 0.4, [0.3, 1.5]);
       }
+    }
+  }
+
+  // Wing vapor: emit from wingtips when |gForce| > 2.0
+  if (wingVapor && Math.abs(v.gForce) > 2.0 && !v.onGround) {
+    const wingHalf = type.wingSpan * 0.5;
+    _leftPos.copy(pos).addScaledVector(_right, -wingHalf);
+    _rightPos.copy(pos).addScaledVector(_right, wingHalf);
+
+    emitParticles(wingVapor, 2, _leftPos.x, _leftPos.y, _leftPos.z,
+      0.5, 0.3, [1.5, 2.5]);
+    emitParticles(wingVapor, 2, _rightPos.x, _rightPos.y, _rightPos.z,
+      0.5, 0.3, [1.5, 2.5]);
+  }
+
+  // Contrails: emit at altitude > 2000m
+  if (contrails && pos.y > 2000 && !v.onGround) {
+    const wingHalf = type.wingSpan * 0.45;
+    _leftPos.copy(pos).addScaledVector(_right, -wingHalf).addScaledVector(_fwd, type.fuselageLength * 0.3);
+    _rightPos.copy(pos).addScaledVector(_right, wingHalf).addScaledVector(_fwd, type.fuselageLength * 0.3);
+
+    const rate = Math.min((pos.y - 2000) / 3000, 1.0);
+    if (Math.random() < rate) {
+      emitParticles(contrails, 1, _leftPos.x, _leftPos.y, _leftPos.z,
+        0.3, 2.0, [2, 4]);
+      emitParticles(contrails, 1, _rightPos.x, _rightPos.y, _rightPos.z,
+        0.3, 2.0, [2, 4]);
     }
   }
 }
