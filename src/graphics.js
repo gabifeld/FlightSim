@@ -33,6 +33,16 @@ export const GRAPHICS_QUALITY_PRESETS = Object.freeze({
     vegetationDensity: 'high',
     assetQuality: 'high',
   }),
+  mobile: Object.freeze({
+    pixelRatioCap: 2.0,
+    shadowMapEnabled: false,
+    shadowType: THREE.PCFShadowMap,
+    shadowQuality: 'low',
+    cloudQuality: 'low',
+    postFxQuality: 'mobile',
+    vegetationDensity: 'low',
+    assetQuality: 'low',
+  }),
 });
 
 /**

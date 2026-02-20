@@ -40,6 +40,10 @@ function isTouchDevice() {
   return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
 }
 
+export function isMobileDevice() {
+  return isTouchDevice() && window.matchMedia('(pointer: coarse)').matches;
+}
+
 // ── DOM helper ──
 
 function el(tag, className, text) {

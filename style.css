@@ -1685,6 +1685,165 @@ body {
   .pfd-divider:nth-child(n+4) { display: none; }
 }
 
+/* ─── Portrait mode (touch devices) ─── */
+@media (pointer: coarse) and (orientation: portrait) {
+  /* Throttle: responsive height, push up from bottom */
+  .mob-throttle-track {
+    height: 20vh;
+    bottom: 28vh;
+    left: 3vw;
+    width: 8vw;
+    max-width: 36px;
+    min-height: 100px;
+  }
+
+  /* Joystick: responsive, centered-right */
+  .mob-joy-base {
+    width: 26vw;
+    height: 26vw;
+    max-width: 120px;
+    max-height: 120px;
+    right: 4vw;
+    bottom: 4vh;
+  }
+
+  .mob-joy-knob {
+    width: 10vw;
+    height: 10vw;
+    max-width: 44px;
+    max-height: 44px;
+  }
+
+  /* Action buttons: horizontal row above joystick */
+  .mob-btn {
+    width: 9vw;
+    height: 9vw;
+    max-width: 42px;
+    max-height: 42px;
+    font-size: 8px;
+  }
+
+  .mob-btn-gear {
+    right: 4vw;
+    bottom: calc(4vh + 28vw);
+  }
+
+  .mob-btn-flaps {
+    right: calc(4vw + 10vw);
+    bottom: calc(4vh + 28vw);
+  }
+
+  .mob-btn-cam {
+    right: calc(4vw + 20vw);
+    bottom: calc(4vh + 28vw);
+  }
+
+  .mob-btn-ils {
+    right: calc(4vw + 30vw);
+    bottom: calc(4vh + 28vw);
+  }
+
+  .mob-btn-assist {
+    right: calc(4vw + 40vw);
+    bottom: calc(4vh + 28vw);
+  }
+
+  /* Brake: left of throttle */
+  .mob-btn-brake {
+    left: calc(3vw + 10vw);
+    bottom: 28vh;
+  }
+
+  /* Yaw: flanking bottom */
+  .mob-btn-yaw-left {
+    left: 3vw;
+    bottom: 4vh;
+  }
+
+  .mob-btn-yaw-right {
+    right: calc(4vw + 28vw);
+    bottom: 4vh;
+  }
+
+  /* PFD: compact at top-left */
+  #pfd {
+    left: 3vw;
+    bottom: auto;
+    top: 36px;
+    padding: 4px 6px;
+    border-radius: 6px;
+  }
+
+  .pfd-tape {
+    min-width: 32px;
+    padding: 0 4px;
+  }
+
+  .tape-value { font-size: 14px; }
+  .tape-value-sm { font-size: 11px; }
+  .tape-label { font-size: 6px; }
+  .tape-unit { font-size: 5px; }
+
+  /* Hide VS, AoA, G-force in portrait — keep speed, alt, heading */
+  .pfd-tape:nth-child(n+5) { display: none; }
+  .pfd-divider:nth-child(n+4) { display: none; }
+
+  /* Attitude: smaller, top center */
+  #attitude-panel {
+    top: 4px;
+    padding: 4px;
+  }
+
+  #attitude-indicator {
+    width: 60px;
+    height: 60px;
+  }
+
+  /* AP panel */
+  #ap-panel {
+    top: 80px;
+    left: 50%;
+    transform: translateX(-50%);
+    right: auto;
+    padding: 3px 6px;
+  }
+
+  .ap-label { font-size: 6px; }
+  .ap-mode { font-size: 7px; padding: 1px 2px; }
+  .ap-target { font-size: 6px; }
+
+  /* State bar */
+  #state-bar {
+    bottom: 2vh;
+  }
+
+  .state-label { font-size: 7px; letter-spacing: 1.5px; }
+  .state-message { font-size: 10px; }
+
+  /* Aircraft name / time repositioned */
+  .aircraft-name-display { font-size: 8px; top: 4px; left: 6px; }
+  .time-display { font-size: 7px; top: 14px; left: 6px; }
+
+  /* Warnings scaled */
+  .stall-warning { font-size: 22px; letter-spacing: 3px; }
+  .gpws-warning { font-size: 16px; }
+
+  /* Landing score / panels */
+  #landing-score-panel { padding: 12px 16px; min-width: 180px; }
+  .score-grade { font-size: 32px; }
+  .score-total { font-size: 12px; }
+
+  /* ILS panel */
+  #ils-panel { margin-bottom: 30px; padding: 4px 6px; }
+  .ils-crosshair { width: 60px; height: 60px; }
+  .ils-dme { font-size: 9px; }
+
+  /* Menu panels — slightly smaller titles */
+  .menu-title { font-size: 36px; letter-spacing: 8px; }
+  .menu-title-accent { font-size: 36px; }
+  .menu-subtitle { font-size: 9px; letter-spacing: 4px; }
+}
+
 /* ═══════════════════════════════════════════
    CHALLENGE MODES
    ═══════════════════════════════════════════ */

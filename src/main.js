@@ -28,7 +28,7 @@ import { initWeatherFx, updateWeatherFx, setAmbientRef, getCurrentPreset, WEATHE
 import { initReplay, updateRecording, updateReplay, isReplayPlaying } from './replay.js';
 import { initAirportLights, updateAirportLights, setNightMode } from './airportLights.js';
 import { initGamepad } from './gamepad.js';
-import { initMobile, updateMobile } from './mobile.js';
+import { initMobile, updateMobile, isMobileDevice } from './mobile.js';
 import { initAutopilot } from './autopilot.js';
 import { initMenu, isPaused, isMenuOpen, setMenuCallbacks, onGameStart } from './menu.js';
 import { createCity, updateCityNight } from './city.js';
@@ -70,7 +70,14 @@ initWeather();
 // Auto-detect graphics quality if user never explicitly set it
 let detectedQuality = getSetting('graphicsQuality');
 if (!isSettingExplicit('graphicsQuality')) {
-  detectedQuality = runBenchmark(renderer, scene, camera);
+  if (isMobileDevice()) {
+    // Skip benchmark on mobile (unreliable due to thermal throttling)
+    // Use dedicated mobile preset: high DPR + no shadows = sharp & fast
+    detectedQuality = 'mobile';
+    setSetting('postFxQuality', 'mobile');
+  } else {
+    detectedQuality = runBenchmark(renderer, scene, camera);
+  }
   setSetting('graphicsQuality', detectedQuality);
 }
 const graphicsPreset = applyGraphicsQuality(detectedQuality);

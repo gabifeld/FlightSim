@@ -4,11 +4,11 @@ const STORAGE_KEY = 'flightsim_settings';
 const SCORES_KEY = 'flightsim_scores';
 
 const defaults = {
-  graphicsQuality: 'high', // 'low', 'medium', 'high'
+  graphicsQuality: 'high', // 'low', 'medium', 'high', 'mobile'
   shadowQuality: 'high', // 'low', 'medium', 'high'
   vegetationDensity: 'high', // 'low', 'medium', 'high'
   cloudQuality: 'high', // 'low', 'medium', 'high'
-  postFxQuality: 'high', // 'low', 'medium', 'high'
+  postFxQuality: 'high', // 'low', 'medium', 'high', 'mobile'
   assetQuality: 'medium', // 'low', 'medium', 'high'
   masterVolume: 0.8,
   mouseSensitivity: 1.0,

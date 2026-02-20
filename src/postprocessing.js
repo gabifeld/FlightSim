@@ -31,6 +31,16 @@ export function initPostProcessing(renderer, scene, camera) {
     return null;
   }
 
+  // Mobile quality: minimal composer — RenderPass + OutputPass only (tone mapping, no bloom/SMAA)
+  if (postFxQuality === 'mobile') {
+    useComposer = true;
+    composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    composer.addPass(new OutputPass());
+    bloomPass = null;
+    return composer;
+  }
+
   useComposer = true;
   composer = new EffectComposer(renderer);
 
