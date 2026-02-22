@@ -793,6 +793,8 @@ body {
   padding: 24px 32px;
   text-align: center;
   min-width: 260px;
+  pointer-events: auto;
+  cursor: pointer;
   animation: score-appear 0.5s ease-out;
 }
 
