@@ -357,6 +357,9 @@
       <!-- Time display -->
       <div id="hud-time" class="time-display">12:00 LOCAL</div>
 
+      <!-- Waypoint indicator -->
+      <div id="hud-waypoint" class="waypoint-display" style="display: none;"></div>
+
       <!-- Replay indicator -->
       <div id="hud-replay" class="replay-indicator" style="display: none;">REPLAY 1x</div>
       <div id="replay-progress-bar" class="replay-progress-bar" style="display: none;">
@@ -373,6 +376,14 @@
       <div id="minimap-panel" class="glass-panel">
         <canvas id="minimap-canvas" width="180" height="180"></canvas>
       </div>
+    </div>
+
+    <!-- Fullscreen Map Overlay -->
+    <div id="fullmap-backdrop" class="fullmap-backdrop" style="display: none;"></div>
+    <div id="minimap-fullscreen" class="minimap-fullscreen" style="display: none;">
+      <canvas id="fullmap-canvas" width="600" height="600"></canvas>
+      <div class="fullmap-close">&times;</div>
+      <div class="fullmap-hint">TAP TO PLACE WAYPOINT</div>
     </div>
 
     <!-- Aircraft Selection Panel -->

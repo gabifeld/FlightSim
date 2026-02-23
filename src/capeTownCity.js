@@ -743,7 +743,7 @@ function buildRoads(scene) {
       const geo = new THREE.PlaneGeometry(majorW, len);
       geo.rotateX(-Math.PI / 2);
       majorTex.repeat.set(1, Math.max(1, Math.round(len / 20)));
-      const mat = new THREE.MeshLambertMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0 });
+      const mat = new THREE.MeshLambertMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
       mat.map.repeat.set(1, Math.max(1, Math.round(len / 20)));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set(road.x, Y, (road.z0 + road.z1) / 2);
@@ -753,7 +753,7 @@ function buildRoads(scene) {
       const len = road.x1 - road.x0;
       const geo = new THREE.PlaneGeometry(majorW, len);
       geo.rotateX(-Math.PI / 2);
-      const mat = new THREE.MeshLambertMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0 });
+      const mat = new THREE.MeshLambertMaterial({ map: majorTex.clone(), roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
       mat.map.repeat.set(1, Math.max(1, Math.round(len / 20)));
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.set((road.x0 + road.x1) / 2, Y, road.z);
@@ -794,7 +794,7 @@ function buildRoads(scene) {
     const minorGeo = new THREE.PlaneGeometry(minorW, 1);
     minorGeo.rotateX(-Math.PI / 2);
     const minorTex = makeRoadTex(false);
-    const minorMat = new THREE.MeshLambertMaterial({ map: minorTex, roughness: 0.92, metalness: 0 });
+    const minorMat = new THREE.MeshLambertMaterial({ map: minorTex, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 
     const minorMesh = new THREE.InstancedMesh(minorGeo, minorMat, minorPositions.length);
     minorMesh.receiveShadow = true;

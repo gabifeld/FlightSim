@@ -16,18 +16,28 @@ import {
   RUNWAY_WIDTH, RUNWAY_LENGTH, TAXI_SPEED_LIMIT,
   AIRPORT2_X, AIRPORT2_Z,
   CITY_CENTER_X, CITY_CENTER_Z, CITY_SIZE,
+  INTL_AIRPORT_X, INTL_AIRPORT_Z, INTL_RUNWAY_LENGTH, INTL_RUNWAY_WIDTH,
+  CT_CENTER_X, CT_CENTER_Z, CT_SIZE_X, CT_SIZE_Z,
+  COAST_LINE_X,
 } from './constants.js';
 import { getRoadNetwork } from './city.js';
-import { getTerrainHeightCached, getCloudDensity } from './terrain.js';
+import { getTerrainHeightCached, getCloudDensity, getHighwayPath } from './terrain.js';
 import { getSetting, setSetting } from './settings.js';
 import { radToDeg } from './utils.js';
 
 let els = {};
 let minimapCtx = null;
-let minimapZoom = 'local'; // 'local' | 'overview'
+let minimapMode = 'local'; // 'local' | 'overview' | 'fullscreen'
 let terrainImage = null; // cached terrain background
 let ilsDismissed = false;
 let lastMinimapUpdateMs = 0;
+let fullmapCtx = null;
+let fullmapCanvas = null;
+
+// Waypoints
+const waypoints = [];
+const MAX_WAYPOINTS = 5;
+let activeWaypointIdx = 0;
 let cachedRoadNetwork = null;
 let cachedTaxiNetwork = null;
 
@@ -106,6 +116,7 @@ export function initHUD() {
     speedTapeStrip: document.getElementById('speed-tape-strip'),
     speedTapeCurrent: document.getElementById('speed-tape-current'),
     speedTapeContainer: document.getElementById('speed-tape'),
+    waypoint: document.getElementById('hud-waypoint'),
   };
 
   const minimapCanvas = document.getElementById('minimap-canvas');
@@ -114,13 +125,28 @@ export function initHUD() {
     minimapCanvas.width = 180;
     minimapCanvas.height = 180;
     minimapCanvas.addEventListener('click', () => {
-      minimapZoom = minimapZoom === 'local' ? 'overview' : 'local';
+      if (minimapMode === 'local') minimapMode = 'overview';
+      else if (minimapMode === 'overview') openFullscreenMap();
+      else minimapMode = 'local';
     });
     // Pre-render terrain (deferred slightly for terrain to be ready)
     setTimeout(() => renderTerrainImage(), 100);
     cachedTaxiNetwork = getTaxiwayNetwork();
     cachedRoadNetwork = getRoadNetwork();
   }
+
+  // Fullscreen map canvas
+  fullmapCanvas = document.getElementById('fullmap-canvas');
+  if (fullmapCanvas) {
+    fullmapCtx = fullmapCanvas.getContext('2d');
+  }
+
+  // Escape to close fullscreen map
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && minimapMode === 'fullscreen') {
+      closeFullscreenMap();
+    }
+  });
 
   // Pre-create landing assist indicator
   const hudContainer = document.getElementById('hud');
@@ -419,6 +445,23 @@ export function updateHUD(flightState) {
 
   // Minimap
   updateMinimap();
+  updateFullscreenMap();
+
+  // Waypoint bearing/distance
+  const awp = getActiveWaypoint();
+  if (awp && els.waypoint) {
+    const dx = awp.x - state.position.x;
+    const dz = awp.z - state.position.z;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const bearingRad = Math.atan2(-dx, -dz);
+    let bearingDeg = bearingRad * 180 / Math.PI;
+    if (bearingDeg < 0) bearingDeg += 360;
+    const distNm = (dist / 1852).toFixed(1);
+    els.waypoint.textContent = `${awp.label} \u2192 ${Math.round(bearingDeg).toString().padStart(3, '0')}\u00B0 ${distNm}nm`;
+    els.waypoint.style.display = '';
+  } else if (els.waypoint) {
+    els.waypoint.style.display = 'none';
+  }
 }
 
 let dailyBriefingDismissed = false;
@@ -698,7 +741,7 @@ function renderTerrainImage() {
 function updateMinimap() {
   if (!minimapCtx) return;
   const nowMs = performance.now();
-  const refreshInterval = minimapZoom === 'local' ? 100 : 250; // 10Hz local, 4Hz overview
+  const refreshInterval = minimapMode === 'local' ? 100 : 250; // 10Hz local, 4Hz overview
   if (nowMs - lastMinimapUpdateMs < refreshInterval) return;
   lastMinimapUpdateMs = nowMs;
 
@@ -710,11 +753,11 @@ function updateMinimap() {
   const pz = getActiveVehicle().position.z;
 
   // Zoom levels
-  const viewRange = minimapZoom === 'local' ? 4000 : 20000;
+  const viewRange = minimapMode === 'local' ? 4000 : 20000;
   const scale = w / viewRange;
 
   // Background - terrain or dark
-  if (minimapZoom === 'overview' && terrainImage) {
+  if (minimapMode === 'overview' && terrainImage) {
     // Draw pre-rendered terrain image
     ctx.drawImage(terrainImage, 0, 0, w, h);
     // Darken slightly for contrast
@@ -778,6 +821,54 @@ function updateMinimap() {
   ctx.fillStyle = 'rgba(100, 100, 100, 0.7)';
   ctx.fillRect(toX(AIRPORT2_X) - rw1/2, toY(AIRPORT2_Z - RUNWAY_LENGTH/2), rw1, rl1);
 
+  // ── International Airport runway ──
+  const intlRw = INTL_RUNWAY_WIDTH * scale;
+  const intlRl = INTL_RUNWAY_LENGTH * scale;
+  ctx.fillStyle = 'rgba(100, 100, 100, 0.7)';
+  ctx.fillRect(toX(INTL_AIRPORT_X) - intlRw/2, toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2), intlRw, intlRl);
+
+  // ── Bayview city zone ──
+  ctx.fillStyle = 'rgba(60, 60, 80, 0.4)';
+  ctx.fillRect(toX(CT_CENTER_X - CT_SIZE_X/2), toY(CT_CENTER_Z - CT_SIZE_Z/2), CT_SIZE_X * scale, CT_SIZE_Z * scale);
+
+  // ── Coastline ──
+  const coastX = toX(COAST_LINE_X);
+  if (coastX > -10 && coastX < w + 10) {
+    ctx.strokeStyle = 'rgba(40, 120, 200, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(coastX, 0);
+    ctx.lineTo(coastX, h);
+    ctx.stroke();
+  }
+
+  // ── Highway ──
+  const hwPath = getHighwayPath();
+  if (hwPath && hwPath.points) {
+    ctx.strokeStyle = 'rgba(120, 120, 120, 0.5)';
+    ctx.lineWidth = Math.max(1, 12 * scale);
+    ctx.beginPath();
+    let hwStarted = false;
+    for (let i = 0; i < hwPath.points.length; i += 5) {
+      const pt = hwPath.points[i];
+      const sx = toX(pt.x);
+      const sy = toY(pt.z);
+      if (!hwStarted) { ctx.moveTo(sx, sy); hwStarted = true; }
+      else ctx.lineTo(sx, sy);
+    }
+    ctx.stroke();
+  }
+
+  // ── Lighthouse marker ──
+  const lhX = toX(13000);
+  const lhY = toY(-200);
+  if (lhX > 0 && lhX < w && lhY > 0 && lhY < h) {
+    ctx.fillStyle = 'rgba(255, 220, 100, 0.8)';
+    ctx.beginPath();
+    ctx.arc(lhX, lhY, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // ── City zone ──
   const cityHalf = CITY_SIZE / 2;
   const cityX = toX(CITY_CENTER_X - cityHalf);
@@ -823,9 +914,50 @@ function updateMinimap() {
   // APT2 label
   ctx.fillText('APT2', toX(AIRPORT2_X), toY(AIRPORT2_Z - RUNWAY_LENGTH/2 - 80));
 
+  // INTL label
+  ctx.fillText('INTL', toX(INTL_AIRPORT_X), toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2 - 80));
+
   // CITY label
   ctx.fillStyle = 'rgba(200, 180, 140, 0.8)';
   ctx.fillText('CITY', toX(CITY_CENTER_X), toY(CITY_CENTER_Z - cityHalf - 40));
+
+  // BAYVIEW label
+  ctx.fillText('BAYVIEW', toX(CT_CENTER_X), toY(CT_CENTER_Z - CT_SIZE_Z/2 - 40));
+
+  // ── Waypoints ──
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    const wpx = toX(wp.x);
+    const wpy = toY(wp.z);
+    if (wpx < -10 || wpx > w + 10 || wpy < -10 || wpy > h + 10) continue;
+    const isActive = i === activeWaypointIdx;
+    const size = isActive ? 5 : 4;
+    ctx.fillStyle = isActive ? '#ff6644' : 'rgba(255, 100, 68, 0.6)';
+    ctx.beginPath();
+    ctx.moveTo(wpx, wpy - size);
+    ctx.lineTo(wpx + size, wpy);
+    ctx.lineTo(wpx, wpy + size);
+    ctx.lineTo(wpx - size, wpy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = isActive ? '#ffaa88' : 'rgba(255, 170, 136, 0.7)';
+    ctx.font = 'bold 8px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(wp.label, wpx, wpy - size - 3);
+  }
+
+  // ── Dashed line to active waypoint ──
+  if (waypoints.length > 0 && activeWaypointIdx < waypoints.length) {
+    const awp = waypoints[activeWaypointIdx];
+    ctx.strokeStyle = 'rgba(255, 100, 68, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(w / 2, h / 2);
+    ctx.lineTo(toX(awp.x), toY(awp.z));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
   // ── Aircraft dot ──
   ctx.fillStyle = '#44ff66';
@@ -860,7 +992,250 @@ function updateMinimap() {
   ctx.fillStyle = 'rgba(150, 180, 255, 0.5)';
   ctx.font = '8px sans-serif';
   ctx.textAlign = 'right';
-  ctx.fillText(minimapZoom === 'local' ? 'LOCAL' : 'OVERVIEW', w - 4, h - 3);
+  ctx.fillText(minimapMode === 'local' ? 'LOCAL' : 'OVERVIEW', w - 4, h - 3);
+}
+
+// ── Waypoint helpers ──
+
+function addWaypoint(worldX, worldZ) {
+  if (waypoints.length >= MAX_WAYPOINTS) return;
+  waypoints.push({ x: worldX, z: worldZ, label: 'WPT' + (waypoints.length + 1) });
+  activeWaypointIdx = waypoints.length - 1;
+}
+
+function removeWaypointAt(worldX, worldZ, hitRadius) {
+  for (let i = waypoints.length - 1; i >= 0; i--) {
+    const dx = waypoints[i].x - worldX;
+    const dz = waypoints[i].z - worldZ;
+    if (Math.sqrt(dx * dx + dz * dz) < hitRadius) {
+      waypoints.splice(i, 1);
+      // Relabel remaining waypoints
+      for (let j = 0; j < waypoints.length; j++) waypoints[j].label = 'WPT' + (j + 1);
+      if (activeWaypointIdx >= waypoints.length) activeWaypointIdx = Math.max(0, waypoints.length - 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+function getActiveWaypoint() {
+  return waypoints.length > 0 ? waypoints[activeWaypointIdx] : null;
+}
+
+// ── Fullscreen map ──
+
+function openFullscreenMap() {
+  minimapMode = 'fullscreen';
+  const overlay = document.getElementById('minimap-fullscreen');
+  const backdrop = document.getElementById('fullmap-backdrop');
+  if (overlay) overlay.style.display = '';
+  if (backdrop) backdrop.style.display = '';
+
+  if (fullmapCanvas && fullmapCtx) {
+    const rect = fullmapCanvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    fullmapCanvas.width = Math.round(rect.width * dpr);
+    fullmapCanvas.height = Math.round(rect.height * dpr);
+    fullmapCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  const closeBtn = document.querySelector('.fullmap-close');
+  if (closeBtn) closeBtn.onclick = closeFullscreenMap;
+  if (backdrop) backdrop.onclick = closeFullscreenMap;
+
+  if (fullmapCanvas) {
+    fullmapCanvas.onclick = (e) => {
+      const rect = fullmapCanvas.getBoundingClientRect();
+      const cx = e.clientX - rect.left;
+      const cy = e.clientY - rect.top;
+      const fullViewRange = 28000;
+      const worldX = (cx / rect.width - 0.5) * fullViewRange;
+      const worldZ = (cy / rect.height - 0.5) * fullViewRange;
+      const hitRadius = fullViewRange / rect.width * 20;
+      if (!removeWaypointAt(worldX, worldZ, hitRadius)) {
+        addWaypoint(worldX, worldZ);
+      }
+    };
+  }
+}
+
+function closeFullscreenMap() {
+  minimapMode = 'local';
+  const overlay = document.getElementById('minimap-fullscreen');
+  const backdrop = document.getElementById('fullmap-backdrop');
+  if (overlay) overlay.style.display = 'none';
+  if (backdrop) backdrop.style.display = 'none';
+}
+
+function updateFullscreenMap() {
+  if (minimapMode !== 'fullscreen' || !fullmapCtx || !fullmapCanvas) return;
+
+  const ctx = fullmapCtx;
+  const dpr = window.devicePixelRatio || 1;
+  const w = fullmapCanvas.width / dpr;
+  const h = fullmapCanvas.height / dpr;
+  const fullViewRange = 28000;
+  const scale = w / fullViewRange;
+
+  // Background terrain
+  if (terrainImage) {
+    const terrainPx = (20000 / fullViewRange) * w;
+    const offset = (w - terrainPx) / 2;
+    ctx.fillStyle = '#0a1020';
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(terrainImage, offset, offset, terrainPx, terrainPx);
+    ctx.fillStyle = 'rgba(0, 8, 20, 0.25)';
+    ctx.fillRect(0, 0, w, h);
+  } else {
+    ctx.fillStyle = '#0a1020';
+    ctx.fillRect(0, 0, w, h);
+  }
+
+  // Ocean east of coastline
+  const coastPx = (COAST_LINE_X / fullViewRange + 0.5) * w;
+  if (coastPx < w) {
+    ctx.fillStyle = 'rgba(15, 30, 60, 0.5)';
+    ctx.fillRect(coastPx, 0, w - coastPx, h);
+    ctx.strokeStyle = 'rgba(40, 120, 200, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(coastPx, 0);
+    ctx.lineTo(coastPx, h);
+    ctx.stroke();
+  }
+
+  const toX = (wx) => (wx / fullViewRange + 0.5) * w;
+  const toY = (wz) => (wz / fullViewRange + 0.5) * h;
+
+  // Grid
+  ctx.strokeStyle = 'rgba(120, 180, 255, 0.06)';
+  ctx.lineWidth = 0.5;
+  for (let g = -14000; g <= 14000; g += 2000) {
+    const sx = toX(g);
+    ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke();
+    const sy = toY(g);
+    ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke();
+  }
+
+  // Runways
+  ctx.fillStyle = 'rgba(140, 140, 140, 0.8)';
+  const rw = RUNWAY_WIDTH * scale;
+  const rl = RUNWAY_LENGTH * scale;
+  ctx.fillRect(toX(0) - rw/2, toY(-RUNWAY_LENGTH/2), rw, rl);
+  ctx.fillRect(toX(AIRPORT2_X) - rw/2, toY(AIRPORT2_Z - RUNWAY_LENGTH/2), rw, rl);
+  const irw = INTL_RUNWAY_WIDTH * scale;
+  const irl = INTL_RUNWAY_LENGTH * scale;
+  ctx.fillRect(toX(INTL_AIRPORT_X) - irw/2, toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2), irw, irl);
+
+  // City zones
+  ctx.fillStyle = 'rgba(60, 60, 80, 0.4)';
+  const cityHalf = CITY_SIZE / 2;
+  ctx.fillRect(toX(CITY_CENTER_X - cityHalf), toY(CITY_CENTER_Z - cityHalf), CITY_SIZE * scale, CITY_SIZE * scale);
+  ctx.fillRect(toX(CT_CENTER_X - CT_SIZE_X/2), toY(CT_CENTER_Z - CT_SIZE_Z/2), CT_SIZE_X * scale, CT_SIZE_Z * scale);
+
+  // Highway
+  const hwPath = getHighwayPath();
+  if (hwPath && hwPath.points) {
+    ctx.strokeStyle = 'rgba(140, 140, 140, 0.5)';
+    ctx.lineWidth = Math.max(1, 14 * scale);
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < hwPath.points.length; i += 3) {
+      const pt = hwPath.points[i];
+      if (!started) { ctx.moveTo(toX(pt.x), toY(pt.z)); started = true; }
+      else ctx.lineTo(toX(pt.x), toY(pt.z));
+    }
+    ctx.stroke();
+  }
+
+  // Lighthouse
+  ctx.fillStyle = 'rgba(255, 220, 100, 0.8)';
+  ctx.beginPath();
+  ctx.arc(toX(13000), toY(-200), 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Waypoints
+  for (let i = 0; i < waypoints.length; i++) {
+    const wp = waypoints[i];
+    const wpx = toX(wp.x);
+    const wpy = toY(wp.z);
+    const isActive = i === activeWaypointIdx;
+    const sz = isActive ? 7 : 5;
+    ctx.fillStyle = isActive ? '#ff6644' : 'rgba(255, 100, 68, 0.6)';
+    ctx.beginPath();
+    ctx.moveTo(wpx, wpy - sz);
+    ctx.lineTo(wpx + sz, wpy);
+    ctx.lineTo(wpx, wpy + sz);
+    ctx.lineTo(wpx - sz, wpy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = isActive ? '#ffaa88' : 'rgba(255, 170, 136, 0.7)';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(wp.label, wpx, wpy - sz - 4);
+  }
+
+  // Dashed line to active waypoint
+  const v = getActiveVehicle();
+  if (waypoints.length > 0 && activeWaypointIdx < waypoints.length) {
+    const awp = waypoints[activeWaypointIdx];
+    ctx.strokeStyle = 'rgba(255, 100, 68, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([6, 4]);
+    ctx.beginPath();
+    ctx.moveTo(toX(v.position.x), toY(v.position.z));
+    ctx.lineTo(toX(awp.x), toY(awp.z));
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  // Aircraft dot
+  const acx = toX(v.position.x);
+  const acy = toY(v.position.z);
+  ctx.fillStyle = '#44ff66';
+  ctx.beginPath();
+  ctx.arc(acx, acy, 4, 0, Math.PI * 2);
+  ctx.fill();
+  const hdgRad = (v.heading * Math.PI) / 180;
+  ctx.strokeStyle = '#44ff66';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(acx, acy);
+  ctx.lineTo(acx - Math.sin(hdgRad) * 20, acy - Math.cos(hdgRad) * 20);
+  ctx.stroke();
+
+  // Labels
+  ctx.font = 'bold 11px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillStyle = 'rgba(200, 200, 255, 0.9)';
+  ctx.fillText('APT1', toX(0), toY(-RUNWAY_LENGTH/2 - 120));
+  ctx.fillText('APT2', toX(AIRPORT2_X), toY(AIRPORT2_Z - RUNWAY_LENGTH/2 - 120));
+  ctx.fillText('INTL', toX(INTL_AIRPORT_X), toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2 - 120));
+  ctx.fillStyle = 'rgba(200, 180, 140, 0.9)';
+  ctx.fillText('CITY', toX(CITY_CENTER_X), toY(CITY_CENTER_Z - cityHalf - 60));
+  ctx.fillText('BAYVIEW', toX(CT_CENTER_X), toY(CT_CENTER_Z - CT_SIZE_Z/2 - 60));
+
+  // Compass
+  ctx.font = '10px sans-serif';
+  ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
+  ctx.fillText('N', w / 2, 14);
+  ctx.fillStyle = 'rgba(180, 180, 220, 0.5)';
+  ctx.fillText('S', w / 2, h - 6);
+  ctx.fillText('W', 10, h / 2 + 4);
+  ctx.fillText('E', w - 10, h / 2 + 4);
+
+  // Scale bar
+  const scaleBarPx = 5000 * scale;
+  ctx.strokeStyle = 'rgba(160, 200, 255, 0.5)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(12, h - 20);
+  ctx.lineTo(12 + scaleBarPx, h - 20);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(160, 200, 255, 0.5)';
+  ctx.font = '8px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText('5km', 12, h - 10);
 }
 
 export function showMessage(msg) {

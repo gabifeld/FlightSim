@@ -884,7 +884,7 @@ function syncVisuals(plane, dt) {
   if (plane.beaconBot) plane.beaconBot.material.opacity = flash;
 
   // Orientation
-  _euler.set(plane.pitch, -plane.heading, plane.roll, 'YXZ');
+  _euler.set(plane.pitch, plane.heading, plane.roll, 'YXZ');
   plane.group.quaternion.setFromEuler(_euler);
 }
 

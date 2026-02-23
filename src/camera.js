@@ -348,6 +348,15 @@ export function updateCamera(dt) {
       camera.position.x += buffetX;
     }
   }
+
+  // Dynamic near plane — scale with altitude to reduce z-fighting
+  // Must stay well below camera-to-aircraft distance (~15m chase, ~3m orbit min)
+  if (mode !== 'cockpit') {
+    const alt = camera.position.y;
+    const nearTarget = alt > 50 ? clamp(alt * 0.003, 0.5, 2) : 0.5;
+    camera.near += (nearTarget - camera.near) * clamp(dt * 4, 0, 1);
+    camera.updateProjectionMatrix();
+  }
 }
 
 export function setReplayCameraMode(enabled) {

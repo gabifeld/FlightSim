@@ -568,11 +568,83 @@ body {
   right: 24px;
   padding: 8px;
   border-radius: 10px;
+  pointer-events: auto;
+  cursor: pointer;
 }
 
 #minimap-canvas {
   display: block;
   border-radius: 6px;
+}
+
+/* ─── Waypoint Display ─── */
+.waypoint-display {
+  position: absolute;
+  top: 40px;
+  right: 240px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ff8866;
+  letter-spacing: 0.5px;
+  pointer-events: none;
+}
+
+/* ─── Fullscreen Map Overlay ─── */
+.fullmap-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 18;
+}
+
+.minimap-fullscreen {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 19;
+  background: rgba(8, 12, 20, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(120, 180, 255, 0.15);
+  border-radius: 12px;
+  padding: 12px;
+  pointer-events: auto;
+}
+
+#fullmap-canvas {
+  display: block;
+  border-radius: 8px;
+  width: 80vmin;
+  height: 80vmin;
+  max-width: 600px;
+  max-height: 600px;
+}
+
+.fullmap-close {
+  position: absolute;
+  top: 8px;
+  right: 12px;
+  font-size: 22px;
+  color: rgba(200, 220, 255, 0.7);
+  cursor: pointer;
+  line-height: 1;
+  pointer-events: auto;
+}
+
+.fullmap-close:hover {
+  color: #ffffff;
+}
+
+.fullmap-hint {
+  text-align: center;
+  font-family: 'Inter', sans-serif;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: rgba(160, 200, 255, 0.4);
+  margin-top: 6px;
 }
 
 /* ─── Aircraft Selection Panel ─── */
@@ -1576,7 +1648,17 @@ body {
 @media (pointer: coarse) {
   /* Hide elements that overlap with touch controls */
   #controls-help-wrap { display: none; }
-  #minimap-panel { display: none; }
+  #minimap-panel {
+    top: auto;
+    bottom: 8px;
+    right: 8px;
+    padding: 4px;
+  }
+  #minimap-canvas {
+    width: 100px;
+    height: 100px;
+  }
+  .waypoint-display { top: 32px; right: auto; left: 50%; transform: translateX(-50%); font-size: 10px; }
 
   /* Systems panel: hide on mobile — info duplicated by touch buttons */
   #systems { display: none; }
@@ -1844,6 +1926,20 @@ body {
   .menu-title { font-size: 36px; letter-spacing: 8px; }
   .menu-title-accent { font-size: 36px; }
   .menu-subtitle { font-size: 9px; letter-spacing: 4px; }
+
+  /* Minimap — portrait positioning */
+  #minimap-panel {
+    top: auto;
+    bottom: calc(4vh + 30vw);
+    left: 3vw;
+    right: auto;
+    padding: 3px;
+  }
+  #minimap-canvas {
+    width: 80px;
+    height: 80px;
+  }
+  .waypoint-display { top: 26px; font-size: 9px; }
 }
 
 /* ═══════════════════════════════════════════

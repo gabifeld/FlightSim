@@ -193,6 +193,9 @@ export function buildAirport(scene, {
     map: getRunwayTexture(),
     roughness: 0.85,
     metalness: 0.0,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
   const runway = new THREE.Mesh(runwayGeo, runwayMat);
   runway.position.set(ox, 0.05, oz);
@@ -210,6 +213,9 @@ export function buildAirport(scene, {
     map: getAsphaltTexture(parallelTaxiLen),
     roughness: 0.85,
     metalness: 0.0,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
   });
   const parallelTaxiway = new THREE.Mesh(parallelGeo, taxiMat);
   parallelTaxiway.position.set(parallelTaxiX, 0.04, oz);

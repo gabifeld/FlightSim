@@ -372,7 +372,7 @@ function buildRoads(scene) {
     const minorGeo = new THREE.PlaneGeometry(ROAD_MINOR, CITY_SIZE);
     minorGeo.rotateX(-Math.PI / 2);
     const minorTex = makeRoadTex(ROAD_MINOR, false);
-    const minorMat = new THREE.MeshLambertMaterial({ map: minorTex, roughness: 0.92, metalness: 0 });
+    const minorMat = new THREE.MeshLambertMaterial({ map: minorTex, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 
     const dummy = new THREE.Object3D();
     const minorMesh = new THREE.InstancedMesh(minorGeo, minorMat, totalMinor);
@@ -399,7 +399,7 @@ function buildRoads(scene) {
   const majorGeo = new THREE.PlaneGeometry(ROAD_MAJOR, CITY_SIZE);
   majorGeo.rotateX(-Math.PI / 2);
   const majorTex = makeRoadTex(ROAD_MAJOR, true);
-  const majorMat = new THREE.MeshLambertMaterial({ map: majorTex, roughness: 0.92, metalness: 0 });
+  const majorMat = new THREE.MeshLambertMaterial({ map: majorTex, roughness: 0.92, metalness: 0, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
 
   const nsMajor = new THREE.Mesh(majorGeo, majorMat);
   nsMajor.position.set(CITY_CENTER_X, Y, CITY_CENTER_Z);

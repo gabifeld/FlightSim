@@ -1387,52 +1387,6 @@ function buildF16Exterior(type, detail, mats) {
   rudder.position.set(0, fRad * 0.2 + type.tailHeight * 0.5, tailZ + fLen * 0.08);
   aircraftGroup.add(rudder);
 
-  // F-16 chin intake — rounded D-shape via ExtrudeGeometry
-  {
-    const iW = fRad * 0.64, iH = fRad * 0.26, iDepth = fLen * 0.22;
-    const outerShape = new THREE.Shape();
-    // Flat bottom, rounded top corners — D-shape profile
-    outerShape.moveTo(-iW, 0);
-    outerShape.lineTo(-iW, iH * 0.25);
-    outerShape.quadraticCurveTo(-iW, iH, -iW * 0.6, iH);
-    outerShape.quadraticCurveTo(0, iH * 1.15, iW * 0.6, iH);
-    outerShape.quadraticCurveTo(iW, iH, iW, iH * 0.25);
-    outerShape.lineTo(iW, 0);
-    outerShape.closePath();
-    // Hollow center (inner opening)
-    const innerW = iW * 0.78, innerH = iH * 0.7;
-    const holePath = new THREE.Path();
-    holePath.moveTo(-innerW, 0.02);
-    holePath.lineTo(-innerW, innerH * 0.3);
-    holePath.quadraticCurveTo(-innerW, innerH, -innerW * 0.55, innerH);
-    holePath.quadraticCurveTo(0, innerH * 1.1, innerW * 0.55, innerH);
-    holePath.quadraticCurveTo(innerW, innerH, innerW, innerH * 0.3);
-    holePath.lineTo(innerW, 0.02);
-    holePath.closePath();
-    outerShape.holes.push(holePath);
-    const intakeGeo = new THREE.ExtrudeGeometry(outerShape, {
-      depth: iDepth, bevelEnabled: true, bevelThickness: 0.02,
-      bevelSize: 0.015, bevelSegments: 2, steps: 1,
-    });
-    intakeGeo.rotateX(Math.PI / 2);
-    intakeGeo.translate(0, 0, iDepth * 0.5);
-    const intakeOuter = markShadow(new THREE.Mesh(intakeGeo, mats.darkMat));
-    intakeOuter.position.set(0, -fRad * 0.52, -fLen * 0.13);
-    aircraftGroup.add(intakeOuter);
-    // Intake duct (dark interior visible through opening)
-    const ductGeo = new THREE.CylinderGeometry(innerW * 0.6, innerW * 0.7, fLen * 0.3, 12, 1, true);
-    ductGeo.rotateX(Math.PI / 2);
-    const intakeDuct = new THREE.Mesh(ductGeo,
-      new THREE.MeshStandardMaterial({ color: 0x0a0c10, roughness: 0.9, metalness: 0.05, side: THREE.BackSide })
-    );
-    intakeDuct.position.set(0, -fRad * 0.42, -fLen * 0.04);
-    aircraftGroup.add(intakeDuct);
-    // Splitter plate (intake separation boundary layer plate)
-    const splitterGeo = new THREE.BoxGeometry(iW * 1.9, 0.018, iDepth * 0.7);
-    const splitter = markShadow(new THREE.Mesh(splitterGeo, mats.panelLineMat));
-    splitter.position.set(0, -fRad * 0.52, -fLen * 0.14);
-    aircraftGroup.add(splitter);
-  }
 
   // F-16 bubble canopy — elongated teardrop shape
   {
