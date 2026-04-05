@@ -18,3 +18,7 @@ export function degToRad(degrees) {
 export function radToDeg(radians) {
   return radians * (180 / Math.PI);
 }
+
+export function getSunElevation(tod) {
+  return (tod >= 6 && tod <= 18) ? 90 * Math.sin(Math.PI * (tod - 6) / 12) : -10;
+}

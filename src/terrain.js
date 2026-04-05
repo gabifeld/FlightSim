@@ -28,52 +28,217 @@ import {
   INTL_RUNWAY_LENGTH,
   INTL_RUNWAY_WIDTH,
 } from './constants.js';
-import { smoothstep } from './utils.js';
-import { getSunDirection, scene as sceneRef } from './scene.js';
+import { clamp, smoothstep, getSunElevation } from './utils.js';
+import { getAirportFlattenZones } from './airportData.js';
+import { getSunDirection, getTimeOfDay, scene as sceneRef } from './scene.js';
 import { getSetting, isSettingExplicit } from './settings.js';
+import { queryRoadElevation as queryCityRoadElevation } from './roadGraph.js';
 
 const simplex = new SimplexNoise();
+
+// Module-level terrain shader reference for per-frame uniform updates
+let terrainShaderRef = null;
+let terrainShaderTime = 0;
 
 // Module-level highway spline for external access
 let highwayCurve = null;
 let highwaySamplePoints = null;
 
-// Highway corridor centerline (x, z pairs) for terrain flattening and road mesh
-const HIGHWAY_CENTERLINE = [
-  [0, -300],
-  [-300, -900],
-  [200, -1700],
-  [1400, -2000],
-  [2600, -2400],
-  [3200, -3200],
-  [CITY_CENTER_X, CITY_CENTER_Z],
-  [5000, -4200],
-  [6000, -5000],
-  [6200, -6200],
-  [7000, -7000],
-  [7600, -7400],
-  [AIRPORT2_X, AIRPORT2_Z + 200],
+// ── Highway routing — terrain-aware path generation ──
+// Instead of fixed waypoints through mountains, the router finds valley paths
+// between anchor points by sampling terrain and choosing low-elevation corridors.
+
+// Anchor points — only define START, END, and mandatory waypoints (junctions).
+// The router fills in the path between them through valleys.
+const HIGHWAY_ANCHORS = [
+  [600, -1800],       // Near Airport 1
+  [4000, -5800],      // South of city center (mandatory pass-through)
+  [5600, -6100],      // CT spur junction
+  [8400, -8600],      // Near Airport 2
 ];
 
-// Highway spur from inland city toward Cape Town
-const HIGHWAY_SPUR_CT = [
-  [CITY_CENTER_X + 1200, CITY_CENTER_Z + 1000],
-  [6400, -1800],
-  [7600, -800],
-  [8600, -200],
-  [9200, 0],
-  [CT_CENTER_X, CT_CENTER_Z],
+const CITY_SPUR_ANCHORS = [
+  null,               // Will be filled with branch point from main highway
+  [4000, -5150],      // City south edge
 ];
+
+const CT_SPUR_ANCHORS = [
+  null,               // Will be filled with junction point from main highway
+  [12650, -3000],     // Cape Town approach
+];
+
+// Route between two points, sampling terrain to find valley path
+function routeThroughValleys(startX, startZ, endX, endZ, stepSize = 150) {
+  const dx = endX - startX;
+  const dz = endZ - startZ;
+  const totalDist = Math.sqrt(dx * dx + dz * dz);
+  const steps = Math.max(6, Math.ceil(totalDist / stepSize));
+  const points = [[startX, startZ]];
+
+  const perpX = -dz / totalDist;
+  const perpZ = dx / totalDist;
+
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const baseX = startX + dx * t;
+    const baseZ = startZ + dz * t;
+
+    // Previous point for continuity bias
+    const prev = points[points.length - 1];
+
+    // Search very wide (1200m each side), dense samples (21)
+    const searchWidth = 1200;
+    const samples = 21;
+    let bestX = baseX, bestZ = baseZ;
+    let bestCost = Infinity;
+
+    for (let s = -Math.floor(samples / 2); s <= Math.floor(samples / 2); s++) {
+      const offset = (s / Math.floor(samples / 2)) * searchWidth;
+      const sx = baseX + perpX * offset;
+      const sz = baseZ + perpZ * offset;
+
+      // Avoid city zone
+      if (sx >= 2600 && sx <= 5400 && sz >= -5400 && sz <= -2600) continue;
+
+      const h = getLandHeightWithoutRoads(sx, sz);
+      // Height is heavily penalized — mountains are very expensive
+      // Deviation penalty is low so the router freely detours around mountains
+      const devPenalty = Math.abs(offset) * 0.01;
+      const jumpPenalty = Math.hypot(sx - prev[0], sz - prev[1]) * 0.005;
+      const cost = h * 5 + devPenalty + jumpPenalty; // Height STRONGLY dominates
+
+      if (cost < bestCost) {
+        bestCost = cost;
+        bestX = sx;
+        bestZ = sz;
+      }
+    }
+
+    points.push([bestX, bestZ]);
+  }
+
+  points.push([endX, endZ]);
+
+  // Heavy smoothing — 6 passes to remove zigzags while keeping valley alignment
+  for (let pass = 0; pass < 6; pass++) {
+    for (let i = 1; i < points.length - 1; i++) {
+      points[i][0] = points[i - 1][0] * 0.25 + points[i][0] * 0.5 + points[i + 1][0] * 0.25;
+      points[i][1] = points[i - 1][1] * 0.25 + points[i][1] * 0.5 + points[i + 1][1] * 0.25;
+    }
+  }
+
+  return points;
+}
+
+// Build full highway centerline by routing through valleys between anchors
+let HIGHWAY_CENTERLINE = null;
+let HIGHWAY_SPUR_CT = null;
+let HIGHWAY_SPUR_CITY = null;
+
+function generateHighwayRoutes() {
+  // Main highway: route between each pair of anchors
+  const mainRoute = [];
+  for (let i = 0; i < HIGHWAY_ANCHORS.length - 1; i++) {
+    const [sx, sz] = HIGHWAY_ANCHORS[i];
+    const [ex, ez] = HIGHWAY_ANCHORS[i + 1];
+    const segment = routeThroughValleys(sx, sz, ex, ez);
+    // Skip first point of subsequent segments (shared with previous end)
+    const start = i === 0 ? 0 : 1;
+    for (let j = start; j < segment.length; j++) {
+      mainRoute.push(segment[j]);
+    }
+  }
+  HIGHWAY_CENTERLINE = mainRoute;
+
+  // Find closest point on main highway to branch the city spur
+  const cityTarget = [4000, -5800]; // Near anchor 1 (south of city)
+  let bestIdx = 0, bestDist = Infinity;
+  for (let i = 0; i < mainRoute.length; i++) {
+    const d = Math.hypot(mainRoute[i][0] - cityTarget[0], mainRoute[i][1] - cityTarget[1]);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  const cityBranch = mainRoute[bestIdx];
+
+  // City spur: short ramp from highway to city edge
+  HIGHWAY_SPUR_CITY = [
+    [cityBranch[0], cityBranch[1]],
+    [cityBranch[0] * 0.7 + 4000 * 0.3, cityBranch[1] * 0.7 + (-5150) * 0.3],
+    [cityBranch[0] * 0.4 + 4000 * 0.6, cityBranch[1] * 0.4 + (-5150) * 0.6],
+    [4000, -5150],
+  ];
+
+  // Find closest point for CT spur junction
+  const ctTarget = [5600, -6100]; // Near anchor 2
+  bestIdx = 0; bestDist = Infinity;
+  for (let i = 0; i < mainRoute.length; i++) {
+    const d = Math.hypot(mainRoute[i][0] - ctTarget[0], mainRoute[i][1] - ctTarget[1]);
+    if (d < bestDist) { bestDist = d; bestIdx = i; }
+  }
+  const ctBranch = mainRoute[bestIdx];
+
+  // CT spur: route through valleys to Cape Town
+  const ctSegment = routeThroughValleys(ctBranch[0], ctBranch[1], 12650, -3000, 300);
+  HIGHWAY_SPUR_CT = ctSegment;
+}
+
+const HIGHWAY_ROAD_HALF_WIDTH = 24; // widened to ensure terrain vertices are caught
+const HIGHWAY_ROAD_MARGIN = 250;
+const HIGHWAY_MAX_GRADE = 0.035;   // 3.5% — gentler grade forces road to stay lower, avoiding mountains
+const HIGHWAY_VIADUCT_CLEARANCE = 3;
+const HIGHWAY_RAMP_FRACTION = 0.08;
+const HIGHWAY_BRIDGE_CLEARANCE = 3;
+const HIGHWAY_BRIDGE_MIN_SPAN = 3;
+const HIGHWAY_TUNNEL_COVER = 12;
+const HIGHWAY_TUNNEL_MIN_SPAN = 4;
+const HIGHWAY_PROFILE_SAMPLE_SPACING = 30;
+let highwayRoadProfile = null;
+let highwaySpurProfile = null;
+let highwayCityProfile = null;
+const WATER_SURFACE_Y = -2;
+
+// Domain warping — displaces sample coordinates for more organic shapes
+function warp(x, z, strength) {
+  const wx = simplex.noise(x * 0.00015, z * 0.00015 + 7.7) * strength;
+  const wz = simplex.noise(x * 0.00015 + 3.3, z * 0.00015) * strength;
+  return [x + wx, z + wz];
+}
+
+// Ridged noise — abs(noise) inverted to create sharp ridges
+function ridgedNoise(x, z, freq) {
+  const n = simplex.noise(x * freq, z * freq);
+  return 1.0 - Math.abs(n);
+}
 
 function sampleNoise(x, z) {
+  // Domain warp for organic, non-repetitive shapes
+  const [wx, wz] = warp(x, z, 2500);
+
+  // Base terrain: 6 octaves of fBm for broad shapes + fine detail
   let value = 0;
   let amplitude = 1;
-  let frequency = 0.0004;
-  for (let i = 0; i < 4; i++) {
-    value += simplex.noise(x * frequency, z * frequency) * amplitude;
-    amplitude *= 0.5;
-    frequency *= 2;
+  let frequency = 0.00025;
+  for (let i = 0; i < 6; i++) {
+    value += simplex.noise(wx * frequency, wz * frequency) * amplitude;
+    amplitude *= 0.48;
+    frequency *= 2.1;
   }
+
+  // Ridge overlay: sharp mountain ridges in higher areas
+  const ridgeFreq = 0.0003;
+  const r1 = ridgedNoise(wx, wz, ridgeFreq);
+  const r2 = ridgedNoise(wx, wz, ridgeFreq * 2.3);
+  const ridgeValue = r1 * r2; // multiplied ridges create sharper peaks
+
+  // Blend ridges into base — stronger at higher elevations
+  const baseHeight = (value + 1) / 2; // 0-1
+  const ridgeStrength = smoothstep(0.35, 0.7, baseHeight) * 0.6;
+  value += ridgeValue * ridgeStrength * 1.5;
+
+  // Valley carving: deepen low areas for more contrast
+  if (value < -0.2) {
+    value *= 1.0 + (Math.abs(value + 0.2)) * 0.4;
+  }
+
   return value;
 }
 
@@ -110,8 +275,8 @@ function airportFlattenFactor(x, z, cx, cz) {
 }
 
 function cityFlattenFactor(x, z) {
-  const halfSize = CITY_SIZE / 2;
-  const margin = 500; // wide smooth transition so city doesn't cut into mountains
+  const halfSize = CITY_SIZE / 2 + 100; // Extend flatten zone 100m past city edge
+  const margin = 800; // Very wide transition so mountains don't encroach on buildings
   const dx = Math.max(0, Math.abs(x - CITY_CENTER_X) - halfSize);
   const dz = Math.max(0, Math.abs(z - CITY_CENTER_Z) - halfSize);
   const dist = Math.sqrt(dx * dx + dz * dz);
@@ -133,14 +298,211 @@ function segmentMinDist(x, z, segments) {
   return minDist;
 }
 
-function highwayFlattenFactor(x, z) {
-  const roadHalfWidth = 20;
-  const margin = 40;
-  const minDist = Math.min(
-    segmentMinDist(x, z, HIGHWAY_CENTERLINE),
-    segmentMinDist(x, z, HIGHWAY_SPUR_CT)
+function buildRoadProfile(centerline) {
+  const planCurve = new THREE.CatmullRomCurve3(
+    centerline.map(([x, z]) => new THREE.Vector3(x, 0, z)),
+    false,
+    'centripetal'
   );
-  return (1 - smoothstep(0, margin, Math.max(0, minDist - roadHalfWidth))) * 0.7;
+  const planPoints = planCurve.getPoints(Math.max(
+    centerline.length * 10,
+    Math.ceil(planCurve.getLength() / HIGHWAY_PROFILE_SAMPLE_SPACING)
+  ));
+  const profile = planPoints.map((point) => ({
+    x: point.x,
+    z: point.z,
+    y: getLandHeightWithoutRoads(point.x, point.z),
+  }));
+
+  // Step 1: Heavy smoothing — 20 passes of 5-tap filter
+  // At 30m spacing, 20 passes smooths over ~1000m of terrain
+  for (let pass = 0; pass < 20; pass++) {
+    for (let i = 2; i < profile.length - 2; i++) {
+      profile[i].y = (
+        profile[i - 2].y * 0.1 +
+        profile[i - 1].y * 0.2 +
+        profile[i].y * 0.4 +
+        profile[i + 1].y * 0.2 +
+        profile[i + 2].y * 0.1
+      );
+    }
+  }
+
+  // Step 2: Grade limiting — 12 passes bidirectional for full convergence
+  for (let pass = 0; pass < 12; pass++) {
+    for (let i = 1; i < profile.length; i++) {
+      const dx = profile[i].x - profile[i - 1].x;
+      const dz = profile[i].z - profile[i - 1].z;
+      const maxDelta = Math.hypot(dx, dz) * HIGHWAY_MAX_GRADE;
+      profile[i].y = clamp(profile[i].y, profile[i - 1].y - maxDelta, profile[i - 1].y + maxDelta);
+    }
+    for (let i = profile.length - 2; i >= 0; i--) {
+      const dx = profile[i + 1].x - profile[i].x;
+      const dz = profile[i + 1].z - profile[i].z;
+      const maxDelta = Math.hypot(dx, dz) * HIGHWAY_MAX_GRADE;
+      profile[i].y = clamp(profile[i].y, profile[i + 1].y - maxDelta, profile[i + 1].y + maxDelta);
+    }
+  }
+
+  // Step 3: Keep road well above terrain — this is the key to preventing clipping
+  for (let i = 0; i < profile.length; i++) {
+    const surfH = getLandHeightWithoutRoads(profile[i].x, profile[i].z);
+    profile[i].y = Math.max(profile[i].y, surfH + 1.5);
+  }
+  // Re-smooth after terrain push-up (only upward to prevent sinking)
+  for (let pass = 0; pass < 4; pass++) {
+    for (let i = 2; i < profile.length - 2; i++) {
+      const avg = profile[i - 2].y * 0.1 + profile[i - 1].y * 0.2 +
+        profile[i].y * 0.4 + profile[i + 1].y * 0.2 + profile[i + 2].y * 0.1;
+      profile[i].y = Math.max(profile[i].y, avg);
+    }
+  }
+  // Final terrain clamp — generous clearance
+  for (let i = 0; i < profile.length; i++) {
+    const surfH = getLandHeightWithoutRoads(profile[i].x, profile[i].z);
+    profile[i].y = Math.max(profile[i].y, surfH + 1.5);
+  }
+
+  // Step 4: Classify structure
+  for (let i = 0; i < profile.length; i++) {
+    const point = profile[i];
+    point.surfaceY = getNaturalSurfaceHeight(point.x, point.z);
+    const t = profile.length <= 1 ? 0 : i / (profile.length - 1);
+    const rampBlend = smoothstep(0.02, HIGHWAY_RAMP_FRACTION, Math.min(t, 1 - t));
+    const viaductClearance = HIGHWAY_VIADUCT_CLEARANCE * rampBlend;
+    point.y = Math.max(point.y, point.surfaceY + viaductClearance);
+    point.structure = classifyRoadPoint(point);
+  }
+
+  smoothRoadStructures(profile);
+  return profile;
+}
+
+function ensureRoadProfiles() {
+  if (!HIGHWAY_CENTERLINE) generateHighwayRoutes();
+  if (!highwayRoadProfile) highwayRoadProfile = buildRoadProfile(HIGHWAY_CENTERLINE);
+  if (!highwaySpurProfile) highwaySpurProfile = buildRoadProfile(HIGHWAY_SPUR_CT);
+  if (!highwayCityProfile) highwayCityProfile = buildRoadProfile(HIGHWAY_SPUR_CITY);
+}
+
+function sampleRoadProfile(profile, x, z) {
+  let minDist = Infinity;
+  let elevation = 0;
+  let structure = 'open';
+
+  for (let i = 0; i < profile.length - 1; i++) {
+    const a = profile[i];
+    const b = profile[i + 1];
+    const dx = b.x - a.x;
+    const dz = b.z - a.z;
+    const lenSq = dx * dx + dz * dz;
+    if (lenSq < 1e-4) continue;
+
+    const t = clamp(((x - a.x) * dx + (z - a.z) * dz) / lenSq, 0, 1);
+    const px = a.x + t * dx;
+    const pz = a.z + t * dz;
+    const dist = Math.hypot(x - px, z - pz);
+    if (dist < minDist) {
+      minDist = dist;
+      elevation = THREE.MathUtils.lerp(a.y, b.y, t);
+      structure = resolveRoadSegmentStructure(a, b);
+    }
+  }
+
+  return { dist: minDist, elevation, structure };
+}
+
+function getRoadCorridorInfo(x, z) {
+  ensureRoadProfiles();
+  const main = sampleRoadProfile(highwayRoadProfile, x, z);
+  const spur = sampleRoadProfile(highwaySpurProfile, x, z);
+  const city = sampleRoadProfile(highwayCityProfile, x, z);
+  const best = main.dist < spur.dist
+    ? (main.dist < city.dist ? main : city)
+    : (spur.dist < city.dist ? spur : city);
+  if (!Number.isFinite(best.dist)) return { factor: 0, elevation: 0 };
+
+  let factor = 1 - smoothstep(
+    HIGHWAY_ROAD_HALF_WIDTH,
+    HIGHWAY_ROAD_HALF_WIDTH + HIGHWAY_ROAD_MARGIN,
+    best.dist
+  );
+  if (best.structure === 'tunnel') factor = 0;
+  factor *= 1 - getRoadCorridorSuppression(x, z);
+  if (factor < 1e-3) return { factor: 0, elevation: best.elevation };
+  return { factor, elevation: best.elevation };
+}
+
+function sampleRoadSurfaceHeight(profile, x, z) {
+  const sample = sampleRoadProfile(profile, x, z);
+  if (Number.isFinite(sample.elevation)) return sample.elevation;
+  return getTerrainHeight(x, z);
+}
+
+function rectZoneInfluence(x, z, cx, cz, halfX, halfZ, margin) {
+  const dx = Math.max(0, Math.abs(x - cx) - halfX);
+  const dz = Math.max(0, Math.abs(z - cz) - halfZ);
+  return 1 - smoothstep(0, margin, Math.hypot(dx, dz));
+}
+
+function getRoadCorridorSuppression(x, z) {
+  const airport1 = rectZoneInfluence(x, z, 0, 0, RUNWAY_WIDTH / 2 + 520, RUNWAY_LENGTH / 2 + 1450, 420);
+  const airport2 = rectZoneInfluence(x, z, AIRPORT2_X, AIRPORT2_Z, RUNWAY_WIDTH / 2 + 520, RUNWAY_LENGTH / 2 + 1450, 420);
+  const city = rectZoneInfluence(x, z, CITY_CENTER_X, CITY_CENTER_Z, CITY_SIZE / 2 + 220, CITY_SIZE / 2 + 220, 380);
+  const capeTown = rectZoneInfluence(x, z, CT_CENTER_X, CT_CENTER_Z, CT_SIZE_X / 2 + 180, CT_SIZE_Z / 2 + 180, 420);
+  const intl = rectZoneInfluence(x, z, INTL_AIRPORT_X, INTL_AIRPORT_Z, 2500, 1500, 500);
+  const generic = smoothstep(0.12, 0.7, genericAirportFlatten(x, z).factor);
+  return Math.max(airport1, airport2, city, capeTown, intl, generic);
+}
+
+function classifyRoadPoint(point) {
+  const suppression = getRoadCorridorSuppression(point.x, point.z);
+  if (suppression > 0.02) return 'open';
+  const cover = point.surfaceY - point.y;
+  const clearance = point.y - point.surfaceY;
+  if (cover > HIGHWAY_TUNNEL_COVER) return 'tunnel';
+  if (clearance > HIGHWAY_BRIDGE_CLEARANCE) return 'bridge';
+  return 'open';
+}
+
+function resolveRoadSegmentStructure(a, b) {
+  if (a.structure === 'tunnel' || b.structure === 'tunnel') return 'tunnel';
+  if (a.structure === 'bridge' || b.structure === 'bridge') return 'bridge';
+  return 'open';
+}
+
+function smoothRoadStructures(profile) {
+  const smoothed = profile.map((point, idx) => {
+    let tunnelVotes = 0;
+    let bridgeVotes = 0;
+    for (let j = Math.max(0, idx - 2); j <= Math.min(profile.length - 1, idx + 2); j++) {
+      if (profile[j].structure === 'tunnel') tunnelVotes++;
+      if (profile[j].structure === 'bridge') bridgeVotes++;
+    }
+    if (tunnelVotes >= 3) return 'tunnel';
+    if (bridgeVotes >= 3) return 'bridge';
+    return 'open';
+  });
+
+  for (let i = 0; i < profile.length; i++) profile[i].structure = smoothed[i];
+
+  const mergeShortSpans = (kind, minSpan) => {
+    let start = -1;
+    for (let i = 0; i <= profile.length; i++) {
+      const matches = i < profile.length && profile[i].structure === kind;
+      if (matches && start < 0) start = i;
+      if ((!matches || i === profile.length) && start >= 0) {
+        const spanLen = i - start;
+        if (spanLen < minSpan) {
+          for (let j = start; j < i; j++) profile[j].structure = 'open';
+        }
+        start = -1;
+      }
+    }
+  };
+
+  mergeShortSpans('tunnel', HIGHWAY_TUNNEL_MIN_SPAN);
+  mergeShortSpans('bridge', HIGHWAY_BRIDGE_MIN_SPAN);
 }
 
 // Cape Town city flatten — full for CBD/east, partial in Bo-Kaap for hillside effect
@@ -201,17 +563,73 @@ function intlAirportFlattenFactor(x, z) {
   return 1 - smoothstep(0, margin, dist);
 }
 
-function runwayFlattenFactor(x, z) {
+// Generic flatten for data-driven airports (supports arbitrary heading)
+let _extraFlattenZones = null;
+function getExtraFlattenZones() {
+  if (!_extraFlattenZones) {
+    // Get only the NEW airports (not the first 3 which are handled by existing code)
+    const allZones = getAirportFlattenZones();
+    _extraFlattenZones = allZones.filter((_, i) => i >= 3);
+  }
+  return _extraFlattenZones;
+}
+
+// Returns { factor, elevation } — factor is 0-1 flatten strength, elevation is target height
+function genericAirportFlatten(x, z) {
+  const zones = getExtraFlattenZones();
+  let maxF = 0;
+  let targetElev = 0;
+  for (const zone of zones) {
+    // Transform to local coords rotated by runway heading
+    const dx = x - zone.x;
+    const dz = z - zone.z;
+    // Rotate world offset into runway-local frame
+    // Game convention: heading 90 = 0 rotation = runway along Z (N-S)
+    const rotY = (zone.heading - 90) * Math.PI / 180;
+    const cosR = Math.cos(rotY);
+    const sinR = Math.sin(rotY);
+    // After rotation: lx = across runway (width), lz = along runway (length)
+    // Inverse of the mesh rotation to go from world → local
+    const lx = dx * cosR + dz * sinR;
+    const lz = -dx * sinR + dz * cosR;
+
+    const edgeX = Math.max(0, Math.abs(lx) - zone.halfWidth);
+    const edgeZ = Math.max(0, Math.abs(lz) - zone.halfLength);
+    const dist = Math.sqrt(edgeX * edgeX + edgeZ * edgeZ);
+    const f = 1 - smoothstep(0, zone.margin, dist);
+    if (f > maxF) {
+      maxF = f;
+      targetElev = zone.elevation;
+    }
+  }
+  return { factor: maxF, elevation: targetElev };
+}
+
+function infrastructureFlattenFactor(x, z) {
   // Airport 1 at origin
   const f1 = airportFlattenFactor(x, z, 0, 0);
   // Airport 2
   const f2 = airportFlattenFactor(x, z, AIRPORT2_X, AIRPORT2_Z);
   const f3 = cityFlattenFactor(x, z);
-  const f4 = highwayFlattenFactor(x, z);
   const f5 = capeTownFlattenFactor(x, z);
   // International airport
   const f6 = intlAirportFlattenFactor(x, z);
-  return Math.max(f1, f2, f3, f4, f5, f6);
+  return Math.max(f1, f2, f3, f5, f6);
+}
+
+function getLandHeightWithoutRoads(x, z) {
+  const noise = sampleNoise(x, z);
+  const rawHeight = ((noise + 1) / 2) * TERRAIN_MAX_HEIGHT;
+  const flatten = infrastructureFlattenFactor(x, z);
+  let landHeight = rawHeight * (1 - flatten);
+
+  const aptFlatten = genericAirportFlatten(x, z);
+  if (aptFlatten.factor > 0) {
+    const blended = landHeight * (1 - aptFlatten.factor) + aptFlatten.elevation * aptFlatten.factor;
+    landHeight = aptFlatten.factor > 0.5 ? blended : Math.min(landHeight, blended);
+  }
+
+  return Math.max(landHeight, tableMountainHeight(x, z), signalHillHeight(x, z));
 }
 
 // Ocean depression — creates coastline along eastern edge of map
@@ -226,13 +644,18 @@ function oceanFactor(x, z) {
 }
 
 export function getTerrainHeight(x, z) {
-  const noise = sampleNoise(x, z);
-  const rawHeight = ((noise + 1) / 2) * TERRAIN_MAX_HEIGHT;
-  const flatten = runwayFlattenFactor(x, z);
-  const landHeight = rawHeight * (1 - flatten);
+  let withMountains = getLandHeightWithoutRoads(x, z);
 
-  // Add Table Mountain and Signal Hill
-  const withMountains = Math.max(landHeight, tableMountainHeight(x, z), signalHillHeight(x, z));
+  // Cut/fill terrain corridor for highway — wide enough to cover terrain grid cells.
+  // Inner zone: fully flattened to road elevation.
+  // Outer zone: smooth transition back to natural terrain.
+  const road = getRoadCorridorInfo(x, z);
+  if (road.factor > 0) {
+    // Aggressively flatten terrain to road elevation — sharper inner zone
+    const boosted = clamp((road.factor - 0.05) / 0.4, 0, 1);
+    const sharpFactor = boosted * boosted * (3 - 2 * boosted);
+    withMountains = withMountains * (1 - sharpFactor) + road.elevation * sharpFactor;
+  }
 
   // Apply ocean depression east of coastline
   const ocean = oceanFactor(x, z);
@@ -285,10 +708,298 @@ export function getTerrainHeightCached(x, z) {
           h01 * (1 - fx) * fz + h11 * fx * fz);
 }
 
-// Ground level for physics — terrain or water surface, whichever is higher
-const WATER_SURFACE_Y = -2;
 export function getGroundLevel(x, z) {
-  return Math.max(getTerrainHeightCached(x, z), WATER_SURFACE_Y);
+  const terrainH = Math.max(getTerrainHeightCached(x, z), WATER_SURFACE_Y);
+
+  // Aircraft carrier deck (solid surface over ocean)
+  if (_carrierDeckCheck) {
+    const deckH = _carrierDeckCheck(x, z);
+    if (deckH !== null) return deckH;
+  }
+
+  // Check city road graph for city road elevations
+  const cityRoad = queryCityRoadElevation(null, x, z);
+  if (cityRoad && Number.isFinite(cityRoad.elevation)) {
+    return Math.max(cityRoad.elevation + 0.2, terrainH);
+  }
+
+  // Highway corridor
+  ensureRoadProfiles();
+  const road = getRoadCorridorInfo(x, z);
+  if (road.factor > 0.5 && Number.isFinite(road.elevation)) {
+    return Math.max(road.elevation + 0.2, terrainH);
+  }
+
+  return terrainH;
+}
+
+// Carrier deck height callback — set by main.js to avoid circular imports
+let _carrierDeckCheck = null;
+export function setCarrierDeckCheck(fn) { _carrierDeckCheck = fn; }
+
+function getNaturalSurfaceHeight(x, z) {
+  let height = getLandHeightWithoutRoads(x, z);
+  const ocean = oceanFactor(x, z);
+  if (ocean > 0) height = height * (1 - ocean) - ocean * OCEAN_DEPTH;
+  return Math.max(height, WATER_SURFACE_Y);
+}
+
+function addBridgeStructures(scene, points, roadWidth) {
+  if (!points || points.length < 2) return;
+
+  const spans = [];
+  let spanStart = -1;
+
+  for (let i = 0; i < points.length - 1; i++) {
+    const a = points[i];
+    const b = points[i + 1];
+    const structure = a.roadStructure === 'bridge' && b.roadStructure === 'bridge';
+    const midX = (a.x + b.x) * 0.5;
+    const midZ = (a.z + b.z) * 0.5;
+    const deckY = (a.y + b.y) * 0.5;
+    const groundA = getNaturalSurfaceHeight(a.x, a.z);
+    const groundB = getNaturalSurfaceHeight(b.x, b.z);
+    const groundY = getNaturalSurfaceHeight(midX, midZ);
+    const protectedZone = getRoadCorridorSuppression(midX, midZ) > 0.02
+      || isNearAirport(midX, midZ)
+      || isInCityZone(midX, midZ)
+      || isInCapeTownZone(midX, midZ);
+    const clearanceMid = deckY - groundY;
+    const clearanceA = a.y - groundA;
+    const clearanceB = b.y - groundB;
+    const isBridge = structure
+      && !protectedZone
+      && clearanceMid > HIGHWAY_BRIDGE_CLEARANCE
+      && clearanceA > HIGHWAY_BRIDGE_CLEARANCE * 0.45
+      && clearanceB > HIGHWAY_BRIDGE_CLEARANCE * 0.45;
+
+    if (isBridge) {
+      if (spanStart < 0) spanStart = i;
+    } else if (spanStart >= 0) {
+      if (i - spanStart >= HIGHWAY_BRIDGE_MIN_SPAN) spans.push([spanStart, i - 1]);
+      spanStart = -1;
+    }
+  }
+
+  if (spanStart >= 0 && points.length - 1 - spanStart >= HIGHWAY_BRIDGE_MIN_SPAN) {
+    spans.push([spanStart, points.length - 2]);
+  }
+  if (spans.length === 0) return;
+
+  let deckCount = 0;
+  let railCount = 0;
+  const pillarRefs = [];
+
+  for (const [start, end] of spans) {
+    let accumulated = 0;
+    let nextPillar = 0;
+    for (let i = start; i <= end; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const segLen = a.distanceTo(b);
+      deckCount += 1;
+      railCount += 2;
+
+      if (i === start) {
+        pillarRefs.push({ point: a });
+        nextPillar = 82;
+      }
+      accumulated += segLen;
+      if (accumulated >= nextPillar || i === end) {
+        pillarRefs.push({ point: b });
+        nextPillar += 82;
+      }
+    }
+  }
+
+  if (deckCount === 0) return;
+
+  const deckMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(roadWidth + 1.5, 0.4, 1),
+    new THREE.MeshStandardMaterial({ color: 0x7a7c82, roughness: 0.9, metalness: 0.08 }),
+    deckCount
+  );
+  const railMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(0.15, 0.7, 1),
+    new THREE.MeshStandardMaterial({ color: 0xb8bcc3, roughness: 0.72, metalness: 0.18 }),
+    railCount
+  );
+  const pillarMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1.2, 1, 1.2),
+    new THREE.MeshStandardMaterial({ color: 0x8a8d90, roughness: 0.94, metalness: 0.04 }),
+    pillarRefs.length
+  );
+  const dummy = new THREE.Object3D();
+
+  let deckIndex = 0;
+  let railIndex = 0;
+  for (const [start, end] of spans) {
+    for (let i = start; i <= end; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const segLen = Math.max(1, Math.hypot(dx, dz));
+      const heading = Math.atan2(dx, dz);
+      const midX = (a.x + b.x) * 0.5;
+      const midY = (a.y + b.y) * 0.5;
+      const midZ = (a.z + b.z) * 0.5;
+
+      dummy.position.set(midX, midY - 0.3, midZ);
+      dummy.rotation.set(0, heading, 0);
+      dummy.scale.set(1, 1, segLen);
+      dummy.updateMatrix();
+      deckMesh.setMatrixAt(deckIndex++, dummy.matrix);
+
+      const sideX = -dz / segLen;
+      const sideZ = dx / segLen;
+      for (const side of [-1, 1]) {
+        dummy.position.set(
+          midX + sideX * side * (roadWidth * 0.5 + 0.85),
+          midY + 0.25,
+          midZ + sideZ * side * (roadWidth * 0.5 + 0.85)
+        );
+        dummy.rotation.set(0, heading, 0);
+        dummy.scale.set(1, 1, segLen);
+        dummy.updateMatrix();
+        railMesh.setMatrixAt(railIndex++, dummy.matrix);
+      }
+    }
+  }
+
+  for (let i = 0; i < pillarRefs.length; i++) {
+    const { point } = pillarRefs[i];
+    const groundY = getNaturalSurfaceHeight(point.x, point.z);
+    const height = Math.max(1, point.y - groundY - 0.3);
+    dummy.position.set(point.x, groundY + height * 0.5, point.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.set(1, height, 1);
+    dummy.updateMatrix();
+    pillarMesh.setMatrixAt(i, dummy.matrix);
+  }
+
+  deckMesh.castShadow = true;
+  deckMesh.receiveShadow = true;
+  railMesh.castShadow = true;
+  railMesh.receiveShadow = true;
+  pillarMesh.castShadow = true;
+  pillarMesh.receiveShadow = true;
+  scene.add(deckMesh);
+  scene.add(railMesh);
+  scene.add(pillarMesh);
+}
+
+function addTunnelStructures(scene, points, roadWidth) {
+  if (!points || points.length < 2) return;
+
+  const spans = [];
+  let spanStart = -1;
+  for (let i = 0; i < points.length - 1; i++) {
+    const isTunnel = points[i].roadStructure === 'tunnel' && points[i + 1].roadStructure === 'tunnel';
+    if (isTunnel) {
+      if (spanStart < 0) spanStart = i;
+    } else if (spanStart >= 0) {
+      if (i - spanStart >= HIGHWAY_TUNNEL_MIN_SPAN) spans.push([spanStart, i - 1]);
+      spanStart = -1;
+    }
+  }
+  if (spanStart >= 0 && points.length - 1 - spanStart >= HIGHWAY_TUNNEL_MIN_SPAN) {
+    spans.push([spanStart, points.length - 2]);
+  }
+  if (spans.length === 0) return;
+
+  let linerCount = 0;
+  for (const [start, end] of spans) linerCount += end - start + 1;
+
+  const linerMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(roadWidth + 7, 6.8, 1),
+    new THREE.MeshStandardMaterial({ color: 0x24282c, roughness: 0.96, metalness: 0.06, side: THREE.DoubleSide }),
+    linerCount
+  );
+  const portalColumnMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(1.6, 7.2, 1.8),
+    new THREE.MeshStandardMaterial({ color: 0x7f8388, roughness: 0.92, metalness: 0.05 }),
+    spans.length * 4
+  );
+  const portalLintelMesh = new THREE.InstancedMesh(
+    new THREE.BoxGeometry(roadWidth + 7, 1.4, 2.2),
+    new THREE.MeshStandardMaterial({ color: 0x8c9094, roughness: 0.9, metalness: 0.05 }),
+    spans.length * 2
+  );
+  const dummy = new THREE.Object3D();
+
+  let linerIndex = 0;
+  let colIndex = 0;
+  let lintelIndex = 0;
+
+  const placePortal = (point, nextPoint) => {
+    const dx = nextPoint.x - point.x;
+    const dz = nextPoint.z - point.z;
+    const segLen = Math.max(1, Math.hypot(dx, dz));
+    const heading = Math.atan2(dx, dz);
+    const sideX = -dz / segLen;
+    const sideZ = dx / segLen;
+    const inset = 4;
+
+    for (const side of [-1, 1]) {
+      dummy.position.set(
+        point.x + sideX * side * (roadWidth * 0.5 + 1.9) + (dx / segLen) * inset,
+        point.y + 2.4,
+        point.z + sideZ * side * (roadWidth * 0.5 + 1.9) + (dz / segLen) * inset
+      );
+      dummy.rotation.set(0, heading, 0);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      portalColumnMesh.setMatrixAt(colIndex++, dummy.matrix);
+    }
+
+    dummy.position.set(
+      point.x + (dx / segLen) * inset,
+      point.y + 6.2,
+      point.z + (dz / segLen) * inset
+    );
+    dummy.rotation.set(0, heading, 0);
+    dummy.scale.set(1, 1, 1);
+    dummy.updateMatrix();
+    portalLintelMesh.setMatrixAt(lintelIndex++, dummy.matrix);
+  };
+
+  for (const [start, end] of spans) {
+    for (let i = start; i <= end; i++) {
+      const a = points[i];
+      const b = points[i + 1];
+      const dx = b.x - a.x;
+      const dz = b.z - a.z;
+      const segLen = Math.max(1, Math.hypot(dx, dz));
+      const heading = Math.atan2(dx, dz);
+      const midX = (a.x + b.x) * 0.5;
+      const midY = (a.y + b.y) * 0.5 + 2.8;
+      const midZ = (a.z + b.z) * 0.5;
+
+      dummy.position.set(midX, midY, midZ);
+      dummy.rotation.set(0, heading, 0);
+      dummy.scale.set(1, 1, segLen);
+      dummy.updateMatrix();
+      linerMesh.setMatrixAt(linerIndex++, dummy.matrix);
+    }
+
+    const entry = points[start];
+    const entryNext = points[start + 1];
+    const exit = points[end + 1];
+    const exitPrev = points[end];
+    placePortal(entry, entryNext);
+    placePortal(exit, exitPrev);
+  }
+
+  linerMesh.castShadow = true;
+  linerMesh.receiveShadow = true;
+  portalColumnMesh.castShadow = true;
+  portalColumnMesh.receiveShadow = true;
+  portalLintelMesh.castShadow = true;
+  portalLintelMesh.receiveShadow = true;
+  scene.add(linerMesh);
+  scene.add(portalColumnMesh);
+  scene.add(portalLintelMesh);
 }
 
 function createGrassTexture() {
@@ -418,8 +1129,16 @@ function createRockTexture() {
 }
 
 function applyBiomeTerrainShader(material) {
-  material.customProgramCacheKey = () => 'terrain-biome-v4-stepped';
+  material.customProgramCacheKey = () => 'terrain-biome-v5-haze-clouds';
   material.onBeforeCompile = (shader) => {
+    // --- Custom uniforms for atmospheric haze + cloud shadows ---
+    shader.uniforms.uTime = { value: 0.0 };
+    shader.uniforms.uSunDirection = { value: new THREE.Vector3(0, 1, 0) };
+    shader.uniforms.uSunElevation = { value: 45.0 };
+    shader.uniforms.uWindOffset = { value: new THREE.Vector2(0, 0) };
+    shader.uniforms.uHazeColor = { value: new THREE.Vector3(0.62, 0.73, 0.87) };
+    shader.uniforms.uCloudShadows = { value: getSetting('graphicsQuality') === 'high' ? 1.0 : 0.0 };
+
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -439,35 +1158,162 @@ vWorldNormal = normalize(mat3(modelMatrix) * objectNormal);`
         '#include <common>',
         `#include <common>
 varying vec3 vWorldPos;
-varying vec3 vWorldNormal;`
+varying vec3 vWorldNormal;
+
+uniform float uTime;
+uniform vec3 uSunDirection;
+uniform float uSunElevation;
+uniform vec2 uWindOffset;
+uniform vec3 uHazeColor;
+uniform float uCloudShadows;
+
+// --- Simplex-like 2D noise for cloud shadows ---
+vec3 _mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec2 _mod289v2(vec2 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
+vec3 _permute(vec3 x) { return _mod289((x * 34.0 + 1.0) * x); }
+
+float snoise(vec2 v) {
+  const vec4 C = vec4(0.211324865405187, 0.366025403784439,
+                      -0.577350269189626, 0.024390243902439);
+  vec2 i  = floor(v + dot(v, C.yy));
+  vec2 x0 = v - i + dot(i, C.xx);
+  vec2 i1 = (x0.x > x0.y) ? vec2(1.0, 0.0) : vec2(0.0, 1.0);
+  vec4 x12 = x0.xyxy + C.xxzz;
+  x12.xy -= i1;
+  i = _mod289v2(i);
+  vec3 p = _permute(_permute(i.y + vec3(0.0, i1.y, 1.0))
+                              + i.x + vec3(0.0, i1.x, 1.0));
+  vec3 m = max(0.5 - vec3(dot(x0, x0), dot(x12.xy, x12.xy),
+                           dot(x12.zw, x12.zw)), 0.0);
+  m = m * m;
+  m = m * m;
+  vec3 x_ = 2.0 * fract(p * C.www) - 1.0;
+  vec3 ht = abs(x_) - 0.5;
+  vec3 ox = floor(x_ + 0.5);
+  vec3 a0 = x_ - ox;
+  m *= 1.79284291400159 - 0.85373472095314 * (a0 * a0 + ht * ht);
+  vec3 g;
+  g.x = a0.x * x0.x + ht.x * x0.y;
+  g.yz = a0.yz * x12.xz + ht.yz * x12.yw;
+  return 130.0 * dot(m, g);
+}
+
+// Single-octave noise for cloud shadows (cheap)
+float cloudFbm(vec2 p) {
+  return snoise(p) * 0.6 + snoise(p * 2.5) * 0.25;
+}`
       )
       .replace(
         '#include <map_fragment>',
-        `// Stylized stepped elevation bands
-vec3 sandColor = vec3(0.76, 0.70, 0.50);
-vec3 grassColor = vec3(0.40, 0.65, 0.30);
-vec3 darkGrassColor = vec3(0.25, 0.45, 0.20);
-vec3 rockColor = vec3(0.50, 0.48, 0.45);
-vec3 snowColor = vec3(0.95, 0.95, 0.97);
+        `// --- Rich terrain biome shader ---
+// Noise for color variation (cheap hash from world position)
+float px = vWorldPos.x * 0.002;
+float pz = vWorldPos.z * 0.002;
+float scatter = fract(sin(px * 127.1 + pz * 311.7) * 43758.5453);
+float scatter2 = fract(sin(px * 269.5 + pz * 183.3) * 28615.2137);
+float fineNoise = fract(sin(vWorldPos.x * 0.07 + vWorldPos.z * 0.09) * 12345.6789) * 0.06 - 0.03;
 
-float h = vWorldPos.y;
-vec3 terrainColor = sandColor;
-terrainColor = mix(terrainColor, grassColor, smoothstep(2.0, 8.0, h));
-terrainColor = mix(terrainColor, darkGrassColor, smoothstep(40.0, 60.0, h));
-terrainColor = mix(terrainColor, rockColor, smoothstep(120.0, 150.0, h));
-terrainColor = mix(terrainColor, snowColor, smoothstep(300.0, 340.0, h));
-
-// Steep slopes -> rock
+float h = vWorldPos.y + fineNoise * 20.0; // jitter height bands
 float slope = 1.0 - vWorldNormal.y;
-terrainColor = mix(terrainColor, rockColor, smoothstep(0.3, 0.6, slope));
 
-// Shore wetness: darken near y=0
-float shore = 1.0 - smoothstep(0.0, 5.0, h);
-vec3 wetColor = terrainColor * vec3(0.7, 0.75, 0.8);
-terrainColor = mix(terrainColor, wetColor, shore * 0.5);
+// --- Color palette ---
+vec3 wetSand    = vec3(0.55, 0.50, 0.38);
+vec3 drySand    = vec3(0.72, 0.65, 0.48);
+vec3 lightGrass = vec3(0.42, 0.62, 0.28);
+vec3 richGrass  = vec3(0.30, 0.55, 0.18);
+vec3 darkForest = vec3(0.15, 0.32, 0.12);
+vec3 scrub      = vec3(0.50, 0.48, 0.32);
+vec3 dirtBrown  = vec3(0.45, 0.35, 0.25);
+vec3 grayRock   = vec3(0.52, 0.50, 0.48);
+vec3 darkRock   = vec3(0.35, 0.33, 0.32);
+vec3 warmRock   = vec3(0.58, 0.50, 0.42);
+vec3 snow       = vec3(0.94, 0.95, 0.98);
+vec3 iceBlue    = vec3(0.82, 0.88, 0.95);
+
+// --- Elevation-based base color ---
+vec3 terrainColor = wetSand;
+
+// Beach / low ground
+terrainColor = mix(terrainColor, drySand, smoothstep(1.0, 5.0, h));
+
+// Grassland — with scatter variation between light and rich
+vec3 grassBlend = mix(lightGrass, richGrass, scatter);
+terrainColor = mix(terrainColor, grassBlend, smoothstep(5.0, 15.0, h));
+
+// Forest belt — patchy via scatter2
+vec3 forestBlend = mix(richGrass, darkForest, scatter2 * 0.7 + 0.3);
+terrainColor = mix(terrainColor, forestBlend, smoothstep(25.0, 50.0, h));
+
+// Transition scrubland
+terrainColor = mix(terrainColor, scrub, smoothstep(55.0, 80.0, h) * (0.5 + scatter * 0.5));
+
+// Alpine / exposed dirt
+terrainColor = mix(terrainColor, dirtBrown, smoothstep(80.0, 110.0, h));
+
+// Rocky highlands — varied rock tones
+vec3 rockBlend = mix(grayRock, warmRock, scatter);
+terrainColor = mix(terrainColor, rockBlend, smoothstep(120.0, 170.0, h));
+
+// High peaks — dark rock to snow transition
+terrainColor = mix(terrainColor, darkRock, smoothstep(200.0, 250.0, h));
+terrainColor = mix(terrainColor, iceBlue, smoothstep(270.0, 300.0, h) * 0.4);
+terrainColor = mix(terrainColor, snow, smoothstep(300.0, 350.0, h));
+
+// --- Slope effects ---
+// Steep slopes -> exposed rock (variable tones)
+vec3 slopeRock = mix(darkRock, warmRock, scatter * 0.6);
+terrainColor = mix(terrainColor, slopeRock, smoothstep(0.25, 0.55, slope));
+
+// Very steep cliff faces -> dark crevice look
+terrainColor = mix(terrainColor, darkRock * 0.6, smoothstep(0.6, 0.85, slope));
+
+// --- Shore wetness ---
+float shore = 1.0 - smoothstep(0.0, 4.0, h);
+terrainColor = mix(terrainColor, terrainColor * vec3(0.65, 0.70, 0.78), shore * 0.6);
+
+// --- Subtle ambient occlusion from slope ---
+float ao = 1.0 - slope * 0.15;
+terrainColor *= ao;
+
+// --- Cloud shadows on terrain (high quality only) ---
+if (uCloudShadows > 0.5) {
+  vec2 shadowUV = (vWorldPos.xz + uWindOffset) * 0.003;
+  float cloudNoise = cloudFbm(shadowUV);
+  float shadowMask = smoothstep(0.05, 0.25, cloudNoise);
+  float shadowDarken = mix(0.78, 1.0, shadowMask);
+  terrainColor *= shadowDarken;
+}
+
+// --- Improved atmospheric haze ---
+float distToCamera = length(vWorldPos - cameraPosition);
+
+// Exponential distance haze (replaces old linear fade)
+float distHaze = 1.0 - exp(-distToCamera * 0.00008);
+
+// Height-based valley fog: terrain below 50m gets extra haze
+float valleyFog = (1.0 - smoothstep(0.0, 50.0, vWorldPos.y)) * 0.2;
+float hazeFactor = clamp(distHaze + valleyFog * distHaze, 0.0, 0.85);
+
+// Sky-aware haze color from uniform (updated per-frame to match sky)
+vec3 computedHaze = uHazeColor;
+
+// Sunset/sunrise warm tint: when sun is near horizon, blend warm orange-pink
+float sunsetFactor = 1.0 - smoothstep(0.0, 15.0, uSunElevation);
+vec3 sunsetTint = vec3(1.0, 0.55, 0.35);
+computedHaze = mix(computedHaze, sunsetTint, sunsetFactor * 0.55);
+
+// At very low sun, add deeper pink
+float deepSunset = 1.0 - smoothstep(-2.0, 5.0, uSunElevation);
+vec3 deepPink = vec3(0.9, 0.4, 0.45);
+computedHaze = mix(computedHaze, deepPink, deepSunset * 0.3);
+
+terrainColor = mix(terrainColor, computedHaze, hazeFactor);
 
 diffuseColor = vec4(terrainColor, 1.0);`
       );
+
+    // Store shader reference for per-frame uniform updates
+    terrainShaderRef = shader;
   };
 }
 
@@ -543,9 +1389,9 @@ export function createTerrain() {
 
   const material = new THREE.MeshStandardMaterial({
     normalMap: normalMap,
-    normalScale: new THREE.Vector2(0.24, 0.24),
-    roughness: 0.88,
-    metalness: 0.0,
+    normalScale: new THREE.Vector2(0.35, 0.35),
+    roughness: 0.85,
+    metalness: 0.02,
   });
   applyBiomeTerrainShader(material);
 
@@ -597,9 +1443,9 @@ const TREE_COLOR_PALETTE = [
 ];
 
 const VEGETATION_DENSITY_PROFILE = {
-  low: { trees: 1500, bushes: 600, deadTrees: 200, nearRadius: 900, midRadius: 2600, nearTreeCap: 500, nearBushCap: 300, nearDeadCap: 80, impostorCap: 800 },
-  medium: { trees: 2800, bushes: 1000, deadTrees: 350, nearRadius: 1150, midRadius: 3200, nearTreeCap: 900, nearBushCap: 500, nearDeadCap: 140, impostorCap: 1500 },
-  high: { trees: 4000, bushes: 1500, deadTrees: 500, nearRadius: 1450, midRadius: 3900, nearTreeCap: 1400, nearBushCap: 700, nearDeadCap: 200, impostorCap: 2400 },
+  low: { trees: 2500, bushes: 1000, deadTrees: 300, nearRadius: 1000, midRadius: 3000, nearTreeCap: 800, nearBushCap: 500, nearDeadCap: 120, impostorCap: 1200 },
+  medium: { trees: 5000, bushes: 2500, deadTrees: 600, nearRadius: 1400, midRadius: 4000, nearTreeCap: 1600, nearBushCap: 900, nearDeadCap: 250, impostorCap: 2800 },
+  high: { trees: 8000, bushes: 4000, deadTrees: 1000, nearRadius: 1800, midRadius: 5000, nearTreeCap: 2500, nearBushCap: 1200, nearDeadCap: 400, impostorCap: 4000 },
 };
 
 const vegetationLodState = {
@@ -611,11 +1457,16 @@ const vegetationLodState = {
   allTrees: [],
   conifers: [],
   deciduous: [],
+  tallPines: [],
+  wideOaks: [],
   bushes: [],
   deadTrees: [],
   trunkMesh: null,
   coniferMesh: null,
   deciduousMesh: null,
+  tallPineMesh: null,
+  tallPineTrunkMesh: null,
+  wideOakMesh: null,
   bushMesh: null,
   deadMesh: null,
   impostorPoints: null,
@@ -625,6 +1476,7 @@ const vegetationLodState = {
 };
 
 const _vegDummy = new THREE.Object3D();
+const _autumnColor = new THREE.Color(0.7, 0.45, 0.15);
 const _treeImpostorColor = new THREE.Color(0x4b6542);
 const _bushColor = new THREE.Color(0x425b38);
 const _deadImpostorColor = new THREE.Color(0x675f50);
@@ -711,9 +1563,14 @@ export function updateVegetationLOD(focusX, focusZ) {
   let trunkCount = 0;
   let coniferCount = 0;
   let deciduousCount = 0;
+  let tallPineCount = 0;
+  let tallPineTrunkCount = 0;
+  let wideOakCount = 0;
   const trunkCap = vegetationLodState.trunkMesh.userData.maxCount;
   const coniferCap = vegetationLodState.coniferMesh.userData.maxCount;
   const deciduousCap = vegetationLodState.deciduousMesh.userData.maxCount;
+  const tallPineCap = vegetationLodState.tallPineMesh.userData.maxCount;
+  const wideOakCap = vegetationLodState.wideOakMesh.userData.maxCount;
 
   for (let i = 0; i < vegetationLodState.allTrees.length; i++) {
     const t = vegetationLodState.allTrees[i];
@@ -722,17 +1579,17 @@ export function updateVegetationLOD(focusX, focusZ) {
     const distSq = dx * dx + dz * dz;
     if (distSq > nearRadiusSq) continue;
 
-    if (trunkCount < trunkCap) {
-      _vegDummy.position.set(t.x, t.h + t.scale * 0.5, t.z);
-      _vegDummy.rotation.set(0, 0, 0);
-      _vegDummy.scale.setScalar(t.scale * 0.4);
-      _vegDummy.updateMatrix();
-      vegetationLodState.trunkMesh.setMatrixAt(trunkCount, _vegDummy.matrix);
-      trunkCount++;
-    }
-
     if (t.type === 'conifer') {
       if (coniferCount >= coniferCap) continue;
+      // Trunk
+      if (trunkCount < trunkCap) {
+        _vegDummy.position.set(t.x, t.h + t.scale * 0.5, t.z);
+        _vegDummy.rotation.set(0, 0, 0);
+        _vegDummy.scale.setScalar(t.scale * 0.4);
+        _vegDummy.updateMatrix();
+        vegetationLodState.trunkMesh.setMatrixAt(trunkCount, _vegDummy.matrix);
+        trunkCount++;
+      }
       _vegDummy.position.set(t.x, t.h + t.scale * 1.8, t.z);
       _vegDummy.rotation.set(0, 0, 0);
       _vegDummy.scale.setScalar(t.scale * 0.5);
@@ -740,8 +1597,16 @@ export function updateVegetationLOD(focusX, focusZ) {
       vegetationLodState.coniferMesh.setMatrixAt(coniferCount, _vegDummy.matrix);
       vegetationLodState.coniferMesh.setColorAt(coniferCount, t.color);
       coniferCount++;
-    } else {
+    } else if (t.type === 'deciduous') {
       if (deciduousCount >= deciduousCap) continue;
+      if (trunkCount < trunkCap) {
+        _vegDummy.position.set(t.x, t.h + t.scale * 0.5, t.z);
+        _vegDummy.rotation.set(0, 0, 0);
+        _vegDummy.scale.setScalar(t.scale * 0.4);
+        _vegDummy.updateMatrix();
+        vegetationLodState.trunkMesh.setMatrixAt(trunkCount, _vegDummy.matrix);
+        trunkCount++;
+      }
       _vegDummy.position.set(t.x, t.h + t.scale * 1.6, t.z);
       _vegDummy.rotation.set(0, 0, 0);
       _vegDummy.scale.set(t.scale * 0.5, t.scale * 0.4, t.scale * 0.5);
@@ -749,16 +1614,50 @@ export function updateVegetationLOD(focusX, focusZ) {
       vegetationLodState.deciduousMesh.setMatrixAt(deciduousCount, _vegDummy.matrix);
       vegetationLodState.deciduousMesh.setColorAt(deciduousCount, t.color);
       deciduousCount++;
-    }
-
-    if (trunkCount >= trunkCap && coniferCount >= coniferCap && deciduousCount >= deciduousCap) {
-      break;
+    } else if (t.type === 'tallPine') {
+      if (tallPineCount >= tallPineCap) continue;
+      // Taller trunk for tall pine
+      if (tallPineTrunkCount < trunkCap) {
+        _vegDummy.position.set(t.x, t.h + t.scale * 0.8, t.z);
+        _vegDummy.rotation.set(0, 0, 0);
+        _vegDummy.scale.setScalar(t.scale * 0.4);
+        _vegDummy.updateMatrix();
+        vegetationLodState.tallPineTrunkMesh.setMatrixAt(tallPineTrunkCount, _vegDummy.matrix);
+        tallPineTrunkCount++;
+      }
+      _vegDummy.position.set(t.x, t.h + t.scale * 2.4, t.z);
+      _vegDummy.rotation.set(0, 0, 0);
+      _vegDummy.scale.setScalar(t.scale * 0.5);
+      _vegDummy.updateMatrix();
+      vegetationLodState.tallPineMesh.setMatrixAt(tallPineCount, _vegDummy.matrix);
+      vegetationLodState.tallPineMesh.setColorAt(tallPineCount, t.color);
+      tallPineCount++;
+    } else if (t.type === 'wideOak') {
+      if (wideOakCount >= wideOakCap) continue;
+      if (trunkCount < trunkCap) {
+        _vegDummy.position.set(t.x, t.h + t.scale * 0.5, t.z);
+        _vegDummy.rotation.set(0, 0, 0);
+        _vegDummy.scale.setScalar(t.scale * 0.5);
+        _vegDummy.updateMatrix();
+        vegetationLodState.trunkMesh.setMatrixAt(trunkCount, _vegDummy.matrix);
+        trunkCount++;
+      }
+      _vegDummy.position.set(t.x, t.h + t.scale * 1.4, t.z);
+      _vegDummy.rotation.set(0, 0, 0);
+      _vegDummy.scale.set(t.scale * 0.55, t.scale * 0.35, t.scale * 0.55);
+      _vegDummy.updateMatrix();
+      vegetationLodState.wideOakMesh.setMatrixAt(wideOakCount, _vegDummy.matrix);
+      vegetationLodState.wideOakMesh.setColorAt(wideOakCount, t.color);
+      wideOakCount++;
     }
   }
 
   commitInstancedMesh(vegetationLodState.trunkMesh, trunkCount);
   commitInstancedMesh(vegetationLodState.coniferMesh, coniferCount, true);
   commitInstancedMesh(vegetationLodState.deciduousMesh, deciduousCount, true);
+  commitInstancedMesh(vegetationLodState.tallPineMesh, tallPineCount, true);
+  commitInstancedMesh(vegetationLodState.tallPineTrunkMesh, tallPineTrunkCount);
+  commitInstancedMesh(vegetationLodState.wideOakMesh, wideOakCount, true);
 
   let bushCount = 0;
   const bushCap = vegetationLodState.bushMesh.userData.maxCount;
@@ -824,8 +1723,20 @@ export function createVegetation(scene) {
 
     const baseScale = 0.5 + Math.random() * 1.5;
     const sizeBoost = density > 0.3 ? 1.0 + (density - 0.3) * 0.5 : 1.0;
-    const type = Math.random() > 0.4 ? 'conifer' : 'deciduous';
+    // Distribution: 35% conifer, 25% deciduous, 20% tall pine, 20% wide oak
+    const typeRoll = Math.random();
+    const type = typeRoll < 0.35 ? 'conifer' : typeRoll < 0.60 ? 'deciduous' : typeRoll < 0.80 ? 'tallPine' : 'wideOak';
     const color = TREE_COLOR_PALETTE[Math.floor(Math.random() * TREE_COLOR_PALETTE.length)];
+    // Position-based color variation
+    if (x > 10000) {
+      // Near coast: darker greens
+      color.multiplyScalar(0.7 + Math.random() * 0.3);
+    }
+    if (h > 80) {
+      // High altitude: autumn tint
+      const autumnT = Math.min((h - 80) / 120, 1.0);
+      color.lerp(_autumnColor, autumnT * 0.5);
+    }
     treePositions.push({ x, z, h, scale: baseScale * sizeBoost, type, color });
   }
 
@@ -866,13 +1777,25 @@ export function createVegetation(scene) {
 
   const conifers = treePositions.filter(t => t.type === 'conifer');
   const deciduous = treePositions.filter(t => t.type === 'deciduous');
+  const tallPines = treePositions.filter(t => t.type === 'tallPine');
+  const wideOaks = treePositions.filter(t => t.type === 'wideOak');
 
   const trunkGeo = new THREE.CylinderGeometry(0.3, 0.5, 4, 6);
   const trunkMat = new THREE.MeshLambertMaterial({ color: 0x5c3a1e });
+  // Conifer (cone) — 35% of trees
   const coneGeo = new THREE.ConeGeometry(1.5, 4, 6);
   const coniferMat = new THREE.MeshLambertMaterial({ color: 0x2d6b1e });
+  // Deciduous (sphere) — 25% of trees
   const sphereGeo = new THREE.SphereGeometry(1.8, 6, 5);
   const deciduousMat = new THREE.MeshLambertMaterial({ color: 0x3a8c25 });
+  // Tall pine — 20% of trees
+  const tallPineGeo = new THREE.ConeGeometry(1.0, 6, 6);
+  const tallPineMat = new THREE.MeshLambertMaterial({ color: 0x1a5c12 });
+  const tallPineTrunkGeo = new THREE.CylinderGeometry(0.25, 0.4, 6, 6);
+  // Wide oak — 20% of trees
+  const wideOakGeo = new THREE.SphereGeometry(2.2, 6, 5);
+  wideOakGeo.scale(1, 0.6, 1);
+  const wideOakMat = new THREE.MeshLambertMaterial({ color: 0x4a8a30 });
   const bushGeo = new THREE.SphereGeometry(1.0, 5, 4);
   const bushMat = new THREE.MeshLambertMaterial({ color: 0x3a7a20 });
   const deadTrunkGeo = new THREE.CylinderGeometry(0.2, 0.4, 5, 5);
@@ -881,12 +1804,18 @@ export function createVegetation(scene) {
   const trunkInstanced = createVegetationMesh(trunkGeo, trunkMat, vegetationProfile.nearTreeCap);
   const coniferInstanced = createVegetationMesh(coneGeo, coniferMat, vegetationProfile.nearTreeCap);
   const deciduousInstanced = createVegetationMesh(sphereGeo, deciduousMat, vegetationProfile.nearTreeCap);
+  const tallPineInstanced = createVegetationMesh(tallPineGeo, tallPineMat, vegetationProfile.nearTreeCap);
+  const tallPineTrunkInstanced = createVegetationMesh(tallPineTrunkGeo, trunkMat, vegetationProfile.nearTreeCap);
+  const wideOakInstanced = createVegetationMesh(wideOakGeo, wideOakMat, vegetationProfile.nearTreeCap);
   const bushInstanced = createVegetationMesh(bushGeo, bushMat, vegetationProfile.nearBushCap);
   const deadInstanced = createVegetationMesh(deadTrunkGeo, deadTrunkMat, vegetationProfile.nearDeadCap);
 
   scene.add(trunkInstanced);
   scene.add(coniferInstanced);
   scene.add(deciduousInstanced);
+  scene.add(tallPineInstanced);
+  scene.add(tallPineTrunkInstanced);
+  scene.add(wideOakInstanced);
   scene.add(bushInstanced);
   scene.add(deadInstanced);
 
@@ -917,11 +1846,16 @@ export function createVegetation(scene) {
   vegetationLodState.allTrees = treePositions;
   vegetationLodState.conifers = conifers;
   vegetationLodState.deciduous = deciduous;
+  vegetationLodState.tallPines = tallPines;
+  vegetationLodState.wideOaks = wideOaks;
   vegetationLodState.bushes = bushPositions;
   vegetationLodState.deadTrees = deadTreePositions;
   vegetationLodState.trunkMesh = trunkInstanced;
   vegetationLodState.coniferMesh = coniferInstanced;
   vegetationLodState.deciduousMesh = deciduousInstanced;
+  vegetationLodState.tallPineMesh = tallPineInstanced;
+  vegetationLodState.tallPineTrunkMesh = tallPineTrunkInstanced;
+  vegetationLodState.wideOakMesh = wideOakInstanced;
   vegetationLodState.bushMesh = bushInstanced;
   vegetationLodState.deadMesh = deadInstanced;
   vegetationLodState.impostorPoints = impostorPoints;
@@ -1112,81 +2046,82 @@ export function createRuralStructures(scene) {
 
 // Highway connecting Airport 1 → City → Airport 2
 export function createHighway(scene) {
-  // Build winding control points from module-level centerline
-  const controlPoints = HIGHWAY_CENTERLINE.map(([x, z]) => new THREE.Vector3(x, 0, z));
+  ensureRoadProfiles();
 
-  // Sample terrain height for each control point
-  for (const pt of controlPoints) {
-    pt.y = getTerrainHeight(pt.x, pt.z) + 0.2;
-  }
+  // Build the spline from the smoothed road profile so the mesh follows the
+  // same flattened corridor as the terrain.
+  const controlPoints = highwayRoadProfile.map(({ x, y, z }) => new THREE.Vector3(x, y + 0.2, z));
 
-  const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'catmullrom', 0.3);
+  const curve = new THREE.CatmullRomCurve3(controlPoints, false, 'centripetal');
 
   // Store the highway curve and sample points for external access
   highwayCurve = curve;
-  const segments = 300;
-  highwaySamplePoints = curve.getPoints(segments);
+  const segments = 800;
+  highwaySamplePoints = curve.getPoints(segments).map((point) => {
+    const sample = sampleRoadProfile(highwayRoadProfile, point.x, point.z);
+    point.y = sample.elevation + 0.2;
+    point.roadStructure = sample.structure;
+    return point;
+  });
 
   // Wider road: 18m
   const roadWidth = 18;
-  const points = highwaySamplePoints;
-
   // Create road texture with dashed center line and shoulder markings
   const texCanvas = document.createElement('canvas');
   texCanvas.width = 256;
   texCanvas.height = 128;
   const texCtx = texCanvas.getContext('2d');
 
-  // Darker asphalt base
-  texCtx.fillStyle = '#252525';
+  // Asphalt base
+  texCtx.fillStyle = '#3a3a3a';
   texCtx.fillRect(0, 0, 256, 128);
 
-  // Subtle asphalt grain
-  for (let i = 0; i < 2000; i++) {
+  // Asphalt grain
+  for (let i = 0; i < 1500; i++) {
     const gx = Math.random() * 256;
     const gy = Math.random() * 128;
-    const brightness = 30 + Math.random() * 20;
-    texCtx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.3)`;
-    texCtx.fillRect(gx, gy, 1, 1);
+    const brightness = 40 + Math.random() * 30;
+    texCtx.fillStyle = `rgba(${brightness}, ${brightness}, ${brightness}, 0.25)`;
+    texCtx.fillRect(gx, gy, 2, 1);
   }
 
-  // Shoulder markings (solid white lines near edges)
-  texCtx.strokeStyle = '#cccccc';
-  texCtx.lineWidth = 2;
-  texCtx.setLineDash([]);
-  texCtx.beginPath();
-  texCtx.moveTo(0, 8);
-  texCtx.lineTo(256, 8);
-  texCtx.stroke();
-  texCtx.beginPath();
-  texCtx.moveTo(0, 120);
-  texCtx.lineTo(256, 120);
-  texCtx.stroke();
-
-  // White dashed center line
+  // Solid white edge lines (road shoulders)
   texCtx.strokeStyle = '#ffffff';
-  texCtx.lineWidth = 2;
-  texCtx.setLineDash([16, 12]);
-  texCtx.beginPath();
-  texCtx.moveTo(0, 64);
-  texCtx.lineTo(256, 64);
-  texCtx.stroke();
-
-  // Edge lines (solid)
-  texCtx.strokeStyle = '#666666';
-  texCtx.lineWidth = 1;
+  texCtx.lineWidth = 4;
   texCtx.setLineDash([]);
   texCtx.beginPath();
-  texCtx.moveTo(0, 2);
-  texCtx.lineTo(256, 2);
-  texCtx.moveTo(0, 126);
-  texCtx.lineTo(256, 126);
+  texCtx.moveTo(0, 6); texCtx.lineTo(256, 6);
+  texCtx.stroke();
+  texCtx.beginPath();
+  texCtx.moveTo(0, 122); texCtx.lineTo(256, 122);
+  texCtx.stroke();
+
+  // Yellow dashed center line (double line for highway)
+  texCtx.strokeStyle = '#ffcc00';
+  texCtx.lineWidth = 3;
+  texCtx.setLineDash([20, 14]);
+  texCtx.beginPath();
+  texCtx.moveTo(0, 62); texCtx.lineTo(256, 62);
+  texCtx.stroke();
+  texCtx.beginPath();
+  texCtx.moveTo(0, 66); texCtx.lineTo(256, 66);
+  texCtx.stroke();
+
+  // Lane divider dashes (white, thinner)
+  texCtx.strokeStyle = '#dddddd';
+  texCtx.lineWidth = 2;
+  texCtx.setLineDash([12, 18]);
+  texCtx.beginPath();
+  texCtx.moveTo(0, 34); texCtx.lineTo(256, 34);
+  texCtx.stroke();
+  texCtx.beginPath();
+  texCtx.moveTo(0, 94); texCtx.lineTo(256, 94);
   texCtx.stroke();
 
   const roadTex = new THREE.CanvasTexture(texCanvas);
   roadTex.wrapS = THREE.RepeatWrapping;
   roadTex.wrapT = THREE.ClampToEdgeWrapping;
-  roadTex.repeat.set(segments / 4, 1);
+  roadTex.repeat.set(1, 1); // UVs already handle repeating
 
   // Build geometry
   const roadVertices = [];
@@ -1201,8 +2136,15 @@ export function createHighway(scene) {
     // Get perpendicular direction (in XZ plane)
     const perp = new THREE.Vector3(-tangent.z, 0, tangent.x).normalize();
 
-    // Sample terrain height at road center
-    const terrainH = getTerrainHeight(point.x, point.z) + 0.2;
+    // Sample road profile AND actual terrain — always stay above both
+    const profileH = sampleRoadSurfaceHeight(highwayRoadProfile, point.x, point.z);
+    const actualTerrainH = getLandHeightWithoutRoads(point.x, point.z);
+    let terrainH = Math.max(profileH, actualTerrainH) + 0.35;
+
+    // Hide road mesh inside airport/protected zones by sinking it underground
+    if (getRoadCorridorSuppression(point.x, point.z) > 0.3) {
+      terrainH = getLandHeightWithoutRoads(point.x, point.z) - 5;
+    }
 
     const left = new THREE.Vector3(
       point.x - perp.x * roadWidth * 0.5,
@@ -1236,7 +2178,7 @@ export function createHighway(scene) {
   roadGeo.computeVertexNormals();
 
   const roadMat = new THREE.MeshStandardMaterial({
-    map: roadTex,
+    map: roadTex, color: 0xffffff,
     roughness: 0.92,
     metalness: 0.0,
     polygonOffset: true,
@@ -1247,16 +2189,15 @@ export function createHighway(scene) {
   const roadMesh = new THREE.Mesh(roadGeo, roadMat);
   roadMesh.receiveShadow = true;
   scene.add(roadMesh);
+  addBridgeStructures(scene, highwaySamplePoints, roadWidth);
+  addTunnelStructures(scene, highwaySamplePoints, roadWidth);
 
   // ── Cape Town highway spur ──
-  const spurControlPoints = HIGHWAY_SPUR_CT.map(([sx, sz]) => {
-    const sy = getTerrainHeight(sx, sz) + 0.2;
-    return new THREE.Vector3(sx, sy, sz);
-  });
-  const spurCurve = new THREE.CatmullRomCurve3(spurControlPoints, false, 'catmullrom', 0.3);
-  const spurSegs = 150;
+  const spurControlPoints = highwaySpurProfile.map(({ x, y, z }) => new THREE.Vector3(x, y + 0.2, z));
+  const spurCurve = new THREE.CatmullRomCurve3(spurControlPoints, false, 'centripetal');
+  const spurSegs = 400;
   const spurRoadTex = roadTex.clone();
-  spurRoadTex.repeat.set(spurSegs / 4, 1);
+  spurRoadTex.repeat.set(1, 1);
 
   const spurVerts = [];
   const spurUVs = [];
@@ -1266,7 +2207,10 @@ export function createHighway(scene) {
     const pt = spurCurve.getPointAt(t);
     const tan = spurCurve.getTangentAt(t);
     const perp = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
-    const tH = getTerrainHeight(pt.x, pt.z) + 0.2;
+    let tH = Math.max(sampleRoadSurfaceHeight(highwaySpurProfile, pt.x, pt.z), getLandHeightWithoutRoads(pt.x, pt.z)) + 0.35;
+    if (getRoadCorridorSuppression(pt.x, pt.z) > 0.3) {
+      tH = getLandHeightWithoutRoads(pt.x, pt.z) - 5;
+    }
     spurVerts.push(pt.x - perp.x * roadWidth * 0.5, tH, pt.z - perp.z * roadWidth * 0.5);
     spurVerts.push(pt.x + perp.x * roadWidth * 0.5, tH, pt.z + perp.z * roadWidth * 0.5);
     const u = t * (spurSegs / 4);
@@ -1288,8 +2232,65 @@ export function createHighway(scene) {
   scene.add(spurMesh);
 
   // Add spur sample points to highway sample points for road-avoidance checks
-  const spurSamples = spurCurve.getPoints(spurSegs);
+  const spurSamples = spurCurve.getPoints(spurSegs).map((point) => {
+    const sample = sampleRoadProfile(highwaySpurProfile, point.x, point.z);
+    point.y = sample.elevation + 0.2;
+    point.roadStructure = sample.structure;
+    return point;
+  });
+  addBridgeStructures(scene, spurSamples, roadWidth);
+  addTunnelStructures(scene, spurSamples, roadWidth);
   highwaySamplePoints = highwaySamplePoints.concat(spurSamples);
+
+  // ── City spur highway (connects main highway to city center) ──
+  const cityControlPoints = highwayCityProfile.map(({ x, y, z }) => new THREE.Vector3(x, y + 0.2, z));
+  const cityCurve = new THREE.CatmullRomCurve3(cityControlPoints, false, 'centripetal');
+  const citySegs = 300;
+  const cityRoadTex = roadTex.clone();
+  cityRoadTex.repeat.set(1, 1);
+
+  const cityVerts = [];
+  const cityUVs = [];
+  const cityIdx = [];
+  for (let i = 0; i <= citySegs; i++) {
+    const t = i / citySegs;
+    const pt = cityCurve.getPointAt(t);
+    const tan = cityCurve.getTangentAt(t);
+    const perp = new THREE.Vector3(-tan.z, 0, tan.x).normalize();
+    let cH = Math.max(sampleRoadSurfaceHeight(highwayCityProfile, pt.x, pt.z), getLandHeightWithoutRoads(pt.x, pt.z)) + 0.35;
+    if (getRoadCorridorSuppression(pt.x, pt.z) > 0.3) {
+      cH = getLandHeightWithoutRoads(pt.x, pt.z) - 5;
+    }
+    cityVerts.push(pt.x - perp.x * roadWidth * 0.5, cH, pt.z - perp.z * roadWidth * 0.5);
+    cityVerts.push(pt.x + perp.x * roadWidth * 0.5, cH, pt.z + perp.z * roadWidth * 0.5);
+    const u = t * (citySegs / 4);
+    cityUVs.push(u, 0);
+    cityUVs.push(u, 1);
+    if (i < citySegs) {
+      const ci = i * 2;
+      cityIdx.push(ci, ci + 1, ci + 2, ci + 1, ci + 3, ci + 2);
+    }
+  }
+  const cityGeo = new THREE.BufferGeometry();
+  cityGeo.setAttribute('position', new THREE.Float32BufferAttribute(cityVerts, 3));
+  cityGeo.setAttribute('uv', new THREE.Float32BufferAttribute(cityUVs, 2));
+  cityGeo.setIndex(cityIdx);
+  cityGeo.computeVertexNormals();
+  const cityMesh = new THREE.Mesh(cityGeo, roadMat.clone());
+  cityMesh.material.map = cityRoadTex;
+  cityMesh.receiveShadow = true;
+  scene.add(cityMesh);
+
+  // Add city spur samples for road-avoidance and bridge structures
+  const citySamples = cityCurve.getPoints(citySegs).map((point) => {
+    const sample = sampleRoadProfile(highwayCityProfile, point.x, point.z);
+    point.y = sample.elevation + 0.2;
+    point.roadStructure = sample.structure;
+    return point;
+  });
+  addBridgeStructures(scene, citySamples, roadWidth);
+  addTunnelStructures(scene, citySamples, roadWidth);
+  highwaySamplePoints = highwaySamplePoints.concat(citySamples);
 }
 
 // Export function to get the highway spline path
@@ -1437,39 +2438,45 @@ const CLOUD_QUALITY_CONFIG = {
 const CLOUD_DENSITY_ORDER = ['none', 'few', 'normal', 'many'];
 const CLOUD_DENSITY_MULTIPLIER = { none: 0, few: 0.5, normal: 0.9, many: 1.18 };
 
-// Soft cotton-ball cloud puff texture (128px for stylized cartoon look)
+// Soft volumetric cloud puff texture.
 function createCloudTexture() {
-  const size = 128;
+  const size = 192;
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext('2d');
   const mid = size / 2;
 
-  // Soft radial gradient with very gentle edges
-  const g1 = ctx.createRadialGradient(mid, mid, 0, mid, mid, mid);
-  g1.addColorStop(0, 'rgba(255,255,255,1.0)');
-  g1.addColorStop(0.2, 'rgba(255,255,255,0.95)');
-  g1.addColorStop(0.4, 'rgba(255,255,255,0.7)');
-  g1.addColorStop(0.6, 'rgba(255,255,255,0.35)');
-  g1.addColorStop(0.8, 'rgba(255,255,255,0.1)');
-  g1.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = g1;
-  ctx.fillRect(0, 0, size, size);
+  ctx.clearRect(0, 0, size, size);
 
-  // Off-center lumps for organic cotton-ball shape
-  const offsets = [
-    { x: mid * 0.7, y: mid * 0.85, r: mid * 0.55 },
-    { x: mid * 1.25, y: mid * 0.9, r: mid * 0.5 },
-  ];
-  for (const o of offsets) {
-    const g = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
-    g.addColorStop(0, 'rgba(255,255,255,0.4)');
-    g.addColorStop(0.5, 'rgba(255,255,255,0.15)');
+  // Build up a cloud volume from multiple overlapping soft blobs.
+  for (let i = 0; i < 18; i++) {
+    const r = size * (0.12 + Math.random() * 0.26);
+    const x = mid + (Math.random() - 0.5) * size * 0.42;
+    const y = mid + (Math.random() - 0.5) * size * 0.32;
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(255,255,255,0.36)');
+    g.addColorStop(0.45, 'rgba(255,255,255,0.2)');
     g.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, size, size);
   }
+
+  // Broad center mass and soft edge falloff.
+  const mass = ctx.createRadialGradient(mid, mid, size * 0.08, mid, mid, size * 0.56);
+  mass.addColorStop(0, 'rgba(255,255,255,0.92)');
+  mass.addColorStop(0.38, 'rgba(255,255,255,0.62)');
+  mass.addColorStop(0.72, 'rgba(255,255,255,0.2)');
+  mass.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = mass;
+  ctx.fillRect(0, 0, size, size);
+
+  // Underside shadow tint for depth.
+  const shadow = ctx.createLinearGradient(0, size * 0.45, 0, size);
+  shadow.addColorStop(0, 'rgba(90,105,125,0)');
+  shadow.addColorStop(1, 'rgba(75,90,115,0.28)');
+  ctx.fillStyle = shadow;
+  ctx.fillRect(0, 0, size, size);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.needsUpdate = true;
@@ -1503,10 +2510,10 @@ export function createClouds(scene) {
     const mat = new THREE.SpriteMaterial({
       map: cloudPuffTexture,
       transparent: true,
-      opacity: Math.min(0.98, cumulusOpacities[i] * (0.7 + opacityBase * 0.95)),
+      opacity: Math.min(0.8, cumulusOpacities[i] * (0.55 + opacityBase * 0.72)),
       depthWrite: false,
       fog: false,
-      color: 0xffffff,
+      color: 0xf2f6ff,
     });
     mat.userData.role = 'cumulus';
     cloudCumulusMats.push(mat);
@@ -1517,10 +2524,10 @@ export function createClouds(scene) {
     const mat = new THREE.SpriteMaterial({
       map: cloudPuffTexture,
       transparent: true,
-      opacity: Math.min(0.4, shadowOpacities[i] * (0.65 + opacityBase * 0.8)),
+      opacity: Math.min(0.3, shadowOpacities[i] * (0.55 + opacityBase * 0.62)),
       depthWrite: false,
       fog: false,
-      color: 0xcccccc,
+      color: 0xaebbd0,
     });
     mat.userData.role = 'shadow';
     cloudShadowMats.push(mat);
@@ -1530,7 +2537,7 @@ export function createClouds(scene) {
   const area = quality.area;
   const totalCount = quality.cumulusCount;
 
-  // Cumulus-only clusters: 3-5 large puffs each, flat cartoon look
+  // Cumulus cloud clusters.
   for (let c = 0; c < totalCount; c++) {
     const cluster = new THREE.Group();
     cluster.position.set(
@@ -1541,36 +2548,35 @@ export function createClouds(scene) {
     cluster.userData.type = 'cumulus';
     cluster.userData.drift = 0.8 + Math.random() * 0.5;
 
-    const cloudW = 500 + Math.random() * 600;
-    const cloudD = 400 + Math.random() * 400;
-    const cloudH = 30 + Math.random() * 40; // flatter arrangement
-    const puffCount = 3 + Math.floor(Math.random() * 3); // 3-5 puffs
+    const cloudW = 620 + Math.random() * 850;
+    const cloudD = 520 + Math.random() * 760;
+    const cloudH = 70 + Math.random() * 120;
+    const puffCount = 5 + Math.floor(Math.random() * 5);
 
     for (let p = 0; p < puffCount; p++) {
       const mat = cloudCumulusMats[Math.floor(Math.random() * cloudCumulusMats.length)];
       const sprite = new THREE.Sprite(mat);
-      // 2-3x scale for big puffy cartoon look
-      const s = 400 + Math.random() * 500;
-      sprite.scale.set(s, s * (0.45 + Math.random() * 0.2), 1);
+      const s = 280 + Math.random() * 420;
+      sprite.scale.set(s, s * (0.5 + Math.random() * 0.24), 1);
       sprite.position.set(
-        (Math.random() - 0.5) * cloudW,
+        (Math.random() - 0.5) * cloudW * (0.75 + Math.random() * 0.35),
         (Math.random() - 0.5) * cloudH,
-        (Math.random() - 0.5) * cloudD
+        (Math.random() - 0.5) * cloudD * (0.75 + Math.random() * 0.35)
       );
       cluster.add(sprite);
     }
 
-    // Underside shadow puff (1-2 per cluster)
-    const shadeCount = 1 + Math.floor(Math.random() * 2);
+    // Underside shadow puff
+    const shadeCount = 2 + Math.floor(Math.random() * 2);
     for (let s = 0; s < shadeCount; s++) {
       const mat = cloudShadowMats[Math.floor(Math.random() * cloudShadowMats.length)];
       const sprite = new THREE.Sprite(mat);
-      const sz = 350 + Math.random() * 300;
-      sprite.scale.set(sz, sz * 0.3, 1);
+      const sz = 280 + Math.random() * 380;
+      sprite.scale.set(sz, sz * 0.32, 1);
       sprite.position.set(
-        (Math.random() - 0.5) * cloudW * 0.5,
-        -cloudH * 0.6 - Math.random() * 10,
-        (Math.random() - 0.5) * cloudD * 0.5
+        (Math.random() - 0.5) * cloudW * 0.55,
+        -cloudH * 0.55 - Math.random() * 14,
+        (Math.random() - 0.5) * cloudD * 0.55
       );
       cluster.add(sprite);
     }
@@ -1668,7 +2674,7 @@ export function updateCloudColors(sunElevation) {
 function getCloudActiveLimit() {
   const quality = CLOUD_QUALITY_CONFIG[cloudQuality] || CLOUD_QUALITY_CONFIG.high;
   const baseCount = quality.cumulusCount;
-  const weatherFactor = Math.max(0.45, Math.min(2.0, (weatherCloudProfile.cloudCount || 180) / 180));
+  const weatherFactor = Math.max(0.3, Math.min(1.4, (weatherCloudProfile.cloudCount || 180) / 320));
   const densityFactor = CLOUD_DENSITY_MULTIPLIER[cloudDensity] ?? 1.0;
   return Math.floor(baseCount * weatherFactor * densityFactor);
 }
@@ -1709,12 +2715,12 @@ export function applyWeatherCloudProfile(profile) {
   for (let i = 0; i < cloudCumulusMats.length; i++) {
     const mat = cloudCumulusMats[i];
     const base = [0.55, 0.65, 0.75, 0.85][i] || 0.65;
-    mat.opacity = Math.min(0.98, base * (0.7 + opacityBase * 0.95));
+    mat.opacity = Math.min(0.8, base * (0.55 + opacityBase * 0.72));
   }
   for (let i = 0; i < cloudShadowMats.length; i++) {
     const mat = cloudShadowMats[i];
     const base = [0.15, 0.22][i] || 0.18;
-    mat.opacity = Math.min(0.4, base * (0.65 + opacityBase * 0.8));
+    mat.opacity = Math.min(0.3, base * (0.55 + opacityBase * 0.62));
   }
 
   applyCloudDensity();
@@ -1789,5 +2795,402 @@ export function updateWater(dt, windVector, camera) {
   }
   if (sceneRef && sceneRef.fog) {
     waterMat.uniforms.fogColor.value.copy(sceneRef.fog.color);
+  }
+}
+
+// ── Terrain shader per-frame update (haze + cloud shadows) ──
+const _terrainSunDir = new THREE.Vector3();
+
+export function updateTerrainShader(dt, windVector) {
+  if (!terrainShaderRef) return;
+  const u = terrainShaderRef.uniforms;
+
+  // Accumulate time for cloud shadow drift
+  terrainShaderTime += dt;
+  u.uTime.value = terrainShaderTime;
+
+  // Wind offset for cloud shadow movement (accumulated drift)
+  const wx = windVector ? windVector.x * 0.32 : 0;
+  const wz = windVector ? windVector.z * 0.32 : 0;
+  u.uWindOffset.value.x += wx * dt;
+  u.uWindOffset.value.y += wz * dt;
+
+  // Sun direction and elevation
+  _terrainSunDir.copy(getSunDirection());
+  u.uSunDirection.value.copy(_terrainSunDir);
+
+  const tod = getTimeOfDay();
+  const sunElev = getSunElevation(tod);
+  u.uSunElevation.value = sunElev;
+
+  // Compute haze color to match current sky horizon
+  const haze = u.uHazeColor.value;
+  if (sunElev > 15) {
+    // Day: blue-white horizon haze
+    haze.set(0.62, 0.73, 0.87);
+  } else if (sunElev > 2) {
+    // Golden hour transition
+    const t = (sunElev - 2) / 13;
+    haze.set(
+      0.85 + (0.62 - 0.85) * t,
+      0.60 + (0.73 - 0.60) * t,
+      0.45 + (0.87 - 0.45) * t
+    );
+  } else if (sunElev > -2) {
+    // Sunset/sunrise: warm orange
+    const t = (sunElev + 2) / 4;
+    haze.set(
+      0.55 + (0.85 - 0.55) * t,
+      0.35 + (0.60 - 0.35) * t,
+      0.35 + (0.45 - 0.35) * t
+    );
+  } else {
+    // Night: dark blue-grey
+    haze.set(0.12, 0.14, 0.22);
+  }
+}
+
+// ── 3A. Power Lines Along Highway ──
+export function createPowerLines(scene) {
+  if (!highwaySamplePoints || highwaySamplePoints.length < 2) return;
+
+  const dummy = new THREE.Object3D();
+  const poleHeight = 12;
+  const offset = 15; // meters from road center
+
+  // Collect pole positions every ~80m along highway samples
+  const polePositions = [];
+  const step = Math.max(1, Math.round(80 / (highwaySamplePoints.length > 1
+    ? highwaySamplePoints[0].distanceTo(highwaySamplePoints[1]) : 1)));
+
+  for (let i = 0; i < highwaySamplePoints.length - 1; i += step) {
+    const pt = highwaySamplePoints[i];
+    const next = highwaySamplePoints[Math.min(i + step, highwaySamplePoints.length - 1)];
+    if (pt.roadStructure !== 'open' || next.roadStructure !== 'open') continue;
+
+    if (isNearAirport(pt.x, pt.z)) continue;
+    if (isInCityZone(pt.x, pt.z)) continue;
+    if (isInCapeTownZone(pt.x, pt.z)) continue;
+
+    // Perpendicular direction (offset to one side)
+    const dx = next.x - pt.x;
+    const dz = next.z - pt.z;
+    const len = Math.sqrt(dx * dx + dz * dz) || 1;
+    const perpX = -dz / len;
+    const perpZ = dx / len;
+
+    const px = pt.x + perpX * offset;
+    const pz = pt.z + perpZ * offset;
+    // Use road-flattened height so poles follow the road, not raw mountains
+    const h = getTerrainHeight(px, pz);
+
+    polePositions.push({
+      x: px, z: pz, h,
+      topY: h + poleHeight,
+      heading: Math.atan2(dx, dz),
+    });
+  }
+
+  if (polePositions.length === 0) return;
+
+  // Pole cylinders (InstancedMesh)
+  const poleGeo = new THREE.CylinderGeometry(0.15, 0.2, poleHeight, 5);
+  const poleMat = new THREE.MeshLambertMaterial({ color: 0x3a3a3a });
+  const poleMesh = new THREE.InstancedMesh(poleGeo, poleMat, polePositions.length);
+
+  // Cross-arm boxes (InstancedMesh)
+  const armGeo = new THREE.BoxGeometry(3, 0.15, 0.15);
+  const armMesh = new THREE.InstancedMesh(armGeo, poleMat, polePositions.length);
+
+  for (let i = 0; i < polePositions.length; i++) {
+    const p = polePositions[i];
+    // Pole
+    dummy.position.set(p.x, p.h + poleHeight / 2, p.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.setScalar(1);
+    dummy.updateMatrix();
+    poleMesh.setMatrixAt(i, dummy.matrix);
+    // Cross-arm at top
+    dummy.position.set(p.x, p.topY, p.z);
+    dummy.rotation.set(0, p.heading, 0);
+    dummy.updateMatrix();
+    armMesh.setMatrixAt(i, dummy.matrix);
+  }
+
+  scene.add(poleMesh);
+  scene.add(armMesh);
+
+  // Wires: 3 wires per span with catenary sag via LineSegments
+  const wireVerts = [];
+  const wireMat = new THREE.LineBasicMaterial({ color: 0x555555 });
+  const wireOffsets = [-1, 0, 1]; // left/center/right on cross-arm
+  const sag = 0.5;
+
+  for (let i = 0; i < polePositions.length - 1; i++) {
+    const a = polePositions[i];
+    const b = polePositions[i + 1];
+    // Skip if poles are too far apart or too different in elevation
+    const spanDist = Math.sqrt((b.x - a.x) ** 2 + (b.z - a.z) ** 2);
+    if (spanDist > 200) continue;
+    if (Math.abs(a.topY - b.topY) > 15) continue; // skip steep diagonal wires
+
+    const midX = (a.x + b.x) / 2;
+    const midZ = (a.z + b.z) / 2;
+    const midY = (a.topY + b.topY) / 2 - sag;
+
+    for (const wo of wireOffsets) {
+      // Offset along cross-arm direction
+      const sinH = Math.sin(a.heading);
+      const cosH = Math.cos(a.heading);
+      const ox = sinH * wo;
+      const oz = cosH * wo;
+
+      // Pole A → midpoint
+      wireVerts.push(a.x + ox, a.topY, a.z + oz);
+      wireVerts.push(midX + ox, midY, midZ + oz);
+      // Midpoint → Pole B
+      wireVerts.push(midX + ox, midY, midZ + oz);
+      wireVerts.push(b.x + ox, b.topY, b.z + oz);
+    }
+  }
+
+  if (wireVerts.length > 0) {
+    const wireGeo = new THREE.BufferGeometry();
+    wireGeo.setAttribute('position', new THREE.Float32BufferAttribute(wireVerts, 3));
+    const wireLines = new THREE.LineSegments(wireGeo, wireMat);
+    scene.add(wireLines);
+  }
+}
+
+// ── 3B. Cell Towers on Hilltops ──
+export function createCellTowers(scene) {
+  const dummy = new THREE.Object3D();
+  const towerHeight = 25;
+  const positions = [];
+
+  for (let i = 0; i < 5000 && positions.length < 10; i++) {
+    const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.8;
+    const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.8;
+    if (isNearAirport(x, z)) continue;
+    if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
+    const h = getTerrainHeight(x, z);
+    if (h < 100) continue;
+    // Ensure spacing from other towers
+    let tooClose = false;
+    for (const p of positions) {
+      if ((p.x - x) ** 2 + (p.z - z) ** 2 < 2000 * 2000) { tooClose = true; break; }
+    }
+    if (tooClose) continue;
+    positions.push({ x, z, h });
+  }
+
+  if (positions.length === 0) return;
+
+  // Tower cylinders
+  const towerGeo = new THREE.CylinderGeometry(0.3, 0.3, towerHeight, 6);
+  const towerMat = new THREE.MeshLambertMaterial({ color: 0x888888 });
+  const towerMesh = new THREE.InstancedMesh(towerGeo, towerMat, positions.length);
+
+  // Platforms (3 per tower)
+  const platGeo = new THREE.BoxGeometry(3, 0.3, 3);
+  const platMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
+  const platMesh = new THREE.InstancedMesh(platGeo, platMat, positions.length * 3);
+
+  // Red obstruction lights
+  const lightGeo = new THREE.SphereGeometry(0.4, 6, 4);
+  const lightMat = new THREE.MeshLambertMaterial({ color: 0xff0000, emissive: 0xff0000, emissiveIntensity: 0.8 });
+  const lightMesh = new THREE.InstancedMesh(lightGeo, lightMat, positions.length);
+
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+    // Tower shaft
+    dummy.position.set(p.x, p.h + towerHeight / 2, p.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.setScalar(1);
+    dummy.updateMatrix();
+    towerMesh.setMatrixAt(i, dummy.matrix);
+
+    // 3 platforms at 40%, 65%, 90% height
+    const platHeights = [0.4, 0.65, 0.9];
+    for (let j = 0; j < 3; j++) {
+      dummy.position.set(p.x, p.h + towerHeight * platHeights[j], p.z);
+      dummy.rotation.set(0, Math.random() * Math.PI, 0);
+      dummy.updateMatrix();
+      platMesh.setMatrixAt(i * 3 + j, dummy.matrix);
+    }
+
+    // Red light at top
+    dummy.position.set(p.x, p.h + towerHeight + 0.4, p.z);
+    dummy.updateMatrix();
+    lightMesh.setMatrixAt(i, dummy.matrix);
+  }
+
+  scene.add(towerMesh);
+  scene.add(platMesh);
+  scene.add(lightMesh);
+}
+
+// ── 3C. Rest Stops Along Highway ──
+export function createRestStops(scene) {
+  if (!highwaySamplePoints || highwaySamplePoints.length < 20) return;
+
+  const dummy = new THREE.Object3D();
+  const positions = [];
+  const candidateIndices = [Math.floor(highwaySamplePoints.length * 0.18), Math.floor(highwaySamplePoints.length * 0.42), Math.floor(highwaySamplePoints.length * 0.68)];
+
+  for (const index of candidateIndices) {
+    let pt = null;
+    let next = null;
+    for (let offset = 0; offset < 20 && !pt; offset++) {
+      const a = highwaySamplePoints[Math.min(highwaySamplePoints.length - 2, index + offset)];
+      const b = highwaySamplePoints[Math.min(highwaySamplePoints.length - 1, index + offset + 1)];
+      if (a && b && a.roadStructure === 'open' && b.roadStructure === 'open') {
+        pt = a;
+        next = b;
+      }
+    }
+    if (!pt || !next) continue;
+
+    // Skip if near airport or city zones
+    if (isNearAirport(pt.x, pt.z)) continue;
+    if (isInCityZone(pt.x, pt.z)) continue;
+    if (isInCapeTownZone(pt.x, pt.z)) continue;
+
+    // Perpendicular offset (30m from road center)
+    const tanX = next.x - pt.x;
+    const tanZ = next.z - pt.z;
+    const perpX = -tanZ;
+    const perpZ = tanX;
+    const len = Math.sqrt(perpX * perpX + perpZ * perpZ) || 1;
+    const ox = (perpX / len) * 30;
+    const oz = (perpZ / len) * 30;
+    const x = pt.x + ox;
+    const z = pt.z + oz;
+
+    // Also check the offset position
+    if (isNearAirport(x, z)) continue;
+    if (isInCityZone(x, z)) continue;
+
+    const h = getTerrainHeight(x, z);
+    const heading = Math.atan2(tanX, tanZ);
+    positions.push({ x, z, h, heading });
+  }
+
+  if (positions.length === 0) return;
+
+  // Building (10x4x8m)
+  const bldgGeo = new THREE.BoxGeometry(10, 4, 8);
+  const bldgMat = new THREE.MeshLambertMaterial({ color: 0xccccbb });
+  const bldgMesh = new THREE.InstancedMesh(bldgGeo, bldgMat, positions.length);
+
+  // Canopy (12x0.3x15m)
+  const canopyGeo = new THREE.BoxGeometry(12, 0.3, 15);
+  const canopyMat = new THREE.MeshLambertMaterial({ color: 0xdddddd });
+  const canopyMesh = new THREE.InstancedMesh(canopyGeo, canopyMat, positions.length);
+
+  // Canopy pillars (4 per stop)
+  const pillarGeo = new THREE.CylinderGeometry(0.2, 0.2, 3.5, 6);
+  const pillarMat = new THREE.MeshLambertMaterial({ color: 0x999999 });
+  const pillarMesh = new THREE.InstancedMesh(pillarGeo, pillarMat, positions.length * 4);
+
+  // Parking area
+  const parkGeo = new THREE.PlaneGeometry(20, 18);
+  const parkMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2a, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+
+  for (let i = 0; i < positions.length; i++) {
+    const p = positions[i];
+
+    // Building
+    dummy.position.set(p.x, p.h + 2, p.z);
+    dummy.rotation.set(0, p.heading, 0);
+    dummy.scale.setScalar(1);
+    dummy.updateMatrix();
+    bldgMesh.setMatrixAt(i, dummy.matrix);
+
+    // Canopy offset from building
+    const sinH = Math.sin(p.heading);
+    const cosH = Math.cos(p.heading);
+    const canopyOffX = sinH * 12;
+    const canopyOffZ = cosH * 12;
+    dummy.position.set(p.x + canopyOffX, p.h + 3.5, p.z + canopyOffZ);
+    dummy.rotation.set(0, p.heading, 0);
+    dummy.updateMatrix();
+    canopyMesh.setMatrixAt(i, dummy.matrix);
+
+    // 4 pillars under canopy corners
+    const corners = [[-5, -6], [5, -6], [-5, 6], [5, 6]];
+    for (let j = 0; j < 4; j++) {
+      const cx = corners[j][0];
+      const cz = corners[j][1];
+      // Rotate corner offsets by heading
+      const rx = cx * cosH - cz * sinH;
+      const rz = cx * sinH + cz * cosH;
+      dummy.position.set(
+        p.x + canopyOffX + rx,
+        p.h + 1.75,
+        p.z + canopyOffZ + rz
+      );
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      pillarMesh.setMatrixAt(i * 4 + j, dummy.matrix);
+    }
+
+    // Parking lot (flat plane)
+    const parkMesh = new THREE.Mesh(parkGeo, parkMat);
+    parkMesh.rotation.x = -Math.PI / 2;
+    parkMesh.rotation.z = -p.heading;
+    parkMesh.position.set(p.x + canopyOffX, p.h + 0.15, p.z + canopyOffZ);
+    parkMesh.receiveShadow = true;
+    scene.add(parkMesh);
+  }
+
+  scene.add(bldgMesh);
+  scene.add(canopyMesh);
+  scene.add(pillarMesh);
+}
+
+// ── 3D. Small Ponds ──
+export function createPonds(scene) {
+  const positions = [];
+
+  for (let i = 0; i < 3000 && positions.length < 8; i++) {
+    const x = (Math.random() - 0.5) * TERRAIN_SIZE * 0.7;
+    const z = (Math.random() - 0.5) * TERRAIN_SIZE * 0.7;
+    if (isNearAirport(x, z)) continue;
+    if (isInCityZone(x, z)) continue;
+    if (isInCapeTownZone(x, z)) continue;
+    if (isNearRoad(x, z)) continue;
+    const h = getTerrainHeight(x, z);
+    if (h < 5 || h > 20) continue;
+    // Check flatness: compare nearby samples
+    const hN = getTerrainHeight(x, z + 10);
+    const hS = getTerrainHeight(x, z - 10);
+    const hE = getTerrainHeight(x + 10, z);
+    const hW = getTerrainHeight(x - 10, z);
+    const slope = Math.max(Math.abs(h - hN), Math.abs(h - hS), Math.abs(h - hE), Math.abs(h - hW));
+    if (slope > 2) continue;
+    // Ensure spacing from other ponds
+    let tooClose = false;
+    for (const p of positions) {
+      if ((p.x - x) ** 2 + (p.z - z) ** 2 < 200 * 200) { tooClose = true; break; }
+    }
+    if (tooClose) continue;
+    positions.push({ x, z, h, radius: 15 + Math.random() * 15 });
+  }
+
+  const pondMat = new THREE.MeshLambertMaterial({
+    color: 0x3a6e8f,
+    transparent: true,
+    opacity: 0.6,
+  });
+
+  for (const p of positions) {
+    const geo = new THREE.CircleGeometry(p.radius, 24);
+    const mesh = new THREE.Mesh(geo, pondMat);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(p.x, p.h + 0.1, p.z);
+    mesh.receiveShadow = true;
+    scene.add(mesh);
   }
 }

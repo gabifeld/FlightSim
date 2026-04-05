@@ -7,6 +7,7 @@ import { buildAircraftModel as _buildAircraftModel } from './aircraftGeometry.js
 import { drawPropPanel, drawJetPanel, drawFighterPanel } from './cockpitDisplay.js';
 import { getSetting, isSettingExplicit } from './settings.js';
 import { createAircraftState, registerVehicle } from './vehicleState.js';
+import { getGroundLevel } from './terrain.js';
 
 // Spawn locations
 let spawnLocation = 'runway'; // 'runway' | 'gate' | 'short_final' | 'long_final' | 'runway_apt2' | 'gate_apt2'
@@ -40,6 +41,29 @@ const SPAWN_POSITIONS = {
     x: INTL_AIRPORT_X,
     z: INTL_AIRPORT_Z - 60,
     heading: -Math.PI / 2, // facing west
+  },
+  // New airports — all heading 90 = runway along Z (same as APT1/APT2)
+  // Spawn at south end (+Z end), face north (same as main runway spawn)
+  runway_military: {
+    x: -5000,
+    z: -10000 + 2500 / 2 - 100, // south end of 2500m runway
+    heading: 0, // face north
+  },
+  runway_ga: {
+    x: 5000,
+    z: 12000 + 1200 / 2 - 100, // south end of 1200m runway at KFSG (5000, 12000)
+    heading: 0,
+  },
+  runway_mountain: {
+    x: -3000 - 800 / 2 + 80, // west end of 800m E-W runway at KFSC (-3000, -18000)
+    z: -18000,
+    heading: Math.PI / 2, // face east (runway heading 90)
+  },
+  runway_carrier: {
+    x: 16000,
+    z: -4000 - (330 * 3) / 2 + 100, // near stern of 3x scaled carrier deck
+    y: -2 + 20 * 3 + 1.5, // WATER_SURFACE_Y + scaled deck height + wheel clearance
+    heading: 0,
   },
 };
 
@@ -89,6 +113,14 @@ let cockpitUpdateDivisor = 4;
 
 
 
+
+// Afterburner cones
+let afterburnerInner = null;
+let afterburnerOuter = null;
+
+// Wing flex
+let mainWing = null;
+let lastFlexGDelta = -999;
 
 // Blinking lights
 let beaconMesh, strobeLeftMesh, strobeRightMesh;
@@ -141,7 +173,9 @@ export function resetAircraft() {
     // Ground spawn
     const spawn = SPAWN_POSITIONS[spawnLocation] || SPAWN_POSITIONS.runway;
 
-    aircraftState.position.set(spawn.x, spawn.y !== undefined ? spawn.y : 1.5, spawn.z);
+    // Use terrain height at spawn point so plane doesn't spawn underground
+    const spawnY = spawn.y !== undefined ? spawn.y : (getGroundLevel(spawn.x, spawn.z) + 1.5);
+    aircraftState.position.set(spawn.x, spawnY, spawn.z);
     aircraftState.velocity.set(0, 0, 0);
     aircraftState.quaternion.identity();
     aircraftState.euler.set(0, 0, 0);
@@ -167,6 +201,14 @@ export function resetAircraft() {
     }
   }
 
+  // Safety: ensure aircraft is never below terrain at spawn
+  const safeGroundH = getGroundLevel(aircraftState.position.x, aircraftState.position.z) + 2.0;
+  if (aircraftState.position.y < safeGroundH) {
+    aircraftState.position.y = safeGroundH;
+    aircraftState.altitude = safeGroundH;
+    aircraftState.altitudeAGL = 2.0;
+  }
+
   if (aircraftGroup) {
     aircraftGroup.position.copy(aircraftState.position);
     aircraftGroup.quaternion.copy(aircraftState.quaternion);
@@ -189,6 +231,8 @@ function loadAircraftConfig(typeName) {
     isSeaplane: !!type.isSeaplane,
     fuelCapacity: type.fuelCapacity || 1000,
     fuelBurnRate: type.fuelBurnRate || 100,
+    engineCount: type.engineCount || 1,
+    glassPanel: !!type.glassPanel,
   };
   aircraftState.currentType = typeName;
 }
@@ -270,6 +314,10 @@ function buildAircraftModel(scene, type) {
   cockpitCtx = built.cockpitCtx;
   cockpitTexture = built.cockpitTexture;
   cockpitPanel = built.cockpitPanel;
+  afterburnerInner = built.afterburnerInner;
+  afterburnerOuter = built.afterburnerOuter;
+  mainWing = built.mainWing;
+  lastFlexGDelta = -999;
   cockpitFrameCount = 0;
 
   const detail = (isSettingExplicit('assetQuality') ? getSetting('assetQuality') : getSetting('graphicsQuality'));
@@ -311,10 +359,32 @@ export function updateAircraftVisual(dt, keys) {
   aircraftGroup.position.copy(aircraftState.position);
   aircraftGroup.quaternion.copy(aircraftState.quaternion);
 
-  // Propeller spin
+  // Propeller spin + 4C prop disc/blade visibility
   if (propeller) {
     aircraftState.propSpeed = aircraftState.throttle * 50;
     propeller.rotation.z += aircraftState.propSpeed * dt;
+    const cockpitView = cockpitGroup && cockpitGroup.visible;
+
+    propeller.children.forEach(child => {
+      if (child.userData.isPropBlade) {
+        // In cockpit, avoid solid prop blade obstruction.
+        child.visible = !cockpitView && aircraftState.propSpeed < 15;
+      }
+      if (child.userData.isPropDisc) {
+        if (cockpitView) {
+          child.visible = aircraftState.propSpeed > 3;
+          child.material.opacity = 0.05;
+        } else if (aircraftState.propSpeed < 10) {
+          child.visible = false;
+        } else if (aircraftState.propSpeed > 20) {
+          child.visible = true;
+          child.material.opacity = aircraftState.propSpeed > 35 ? 0.25 : 0.15;
+        } else {
+          child.visible = true;
+          child.material.opacity = ((aircraftState.propSpeed - 10) / 10) * 0.15;
+        }
+      }
+    });
   }
 
   // Jet fan spin
@@ -339,10 +409,11 @@ export function updateAircraftVisual(dt, keys) {
     }
   }
 
-  // Control surface animation
-  const rollInput = (keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0);
-  const pitchInput = (keys['s'] ? 1 : 0) - (keys['w'] ? 1 : 0);
-  const yawInput = (keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0);
+  // Control surface animation follows resolved control commands, not keyboard only.
+  const ctrl = aircraftState.controlInputs;
+  const rollInput = ctrl ? ctrl.roll : ((keys['d'] ? 1 : 0) - (keys['a'] ? 1 : 0));
+  const pitchInput = ctrl ? ctrl.pitch : ((keys['s'] ? 1 : 0) - (keys['w'] ? 1 : 0));
+  const yawInput = ctrl ? ctrl.yaw : ((keys['e'] ? 1 : 0) - (keys['q'] ? 1 : 0));
 
   if (rightAileron) {
     rightAileron.rotation.x += (rollInput * 0.3 - rightAileron.rotation.x) * Math.min(1, 10 * dt);
@@ -373,10 +444,11 @@ export function updateAircraftVisual(dt, keys) {
   // Landing/taxi lights
   if (landingSpotLight) {
     const lightOn = aircraftState.landingLight;
-    landingSpotLight.intensity = lightOn ? 10 : 0;
+    landingSpotLight.intensity = lightOn ? 40 : 0;
+    landingSpotLight.distance = lightOn ? 200 : 0;
     if (landingLightCone) {
       landingLightCone.visible = lightOn;
-      landingLightCone.material.opacity = lightOn ? 0.04 : 0;
+      landingLightCone.material.opacity = lightOn ? 0.06 : 0;
     }
     if (tailLogoLight) {
       tailLogoLight.intensity = lightOn ? 1.5 : 0;
@@ -408,14 +480,77 @@ export function updateAircraftVisual(dt, keys) {
     }
   }
 
-  // Contrails (only visible above 500m AGL)
+  // 4A: Afterburner animation (lightweight)
+  if (afterburnerInner && afterburnerOuter) {
+    const abActive = aircraftState.throttle > 0.5;
+    afterburnerInner.visible = abActive;
+    afterburnerOuter.visible = abActive;
+    const abLight = afterburnerInner.userData.abLight;
+    if (abLight) abLight.visible = abActive;
+    if (abActive) {
+      const intensity = (aircraftState.throttle - 0.5) * 2;
+      const t = performance.now() * 0.001;
+      const flicker = 0.9 + 0.1 * Math.sin(t * 37) * Math.sin(t * 53);
+      const scaledIntensity = intensity * flicker;
+
+      // Inner cone shader uniforms
+      if (afterburnerInner.material.uniforms) {
+        afterburnerInner.material.uniforms.uTime.value = t;
+        afterburnerInner.material.uniforms.uIntensity.value = scaledIntensity;
+      }
+
+      // Outer cone (MeshBasicMaterial) — just opacity + scale
+      afterburnerOuter.material.opacity = 0.15 + scaledIntensity * 0.2;
+
+      // Dynamic scale
+      const scaleXY = 0.8 + scaledIntensity * 0.4;
+      const scaleZ = 0.6 + scaledIntensity * 0.8;
+      afterburnerInner.scale.set(scaleXY, scaleXY, scaleZ);
+      afterburnerOuter.scale.set(scaleXY * 1.1, scaleXY * 1.1, scaleZ * 1.2);
+
+      // Point light glow
+      if (abLight) {
+        abLight.intensity = scaledIntensity * 3.0;
+        abLight.color.setHSL(0.07 + intensity * 0.02, 1.0, 0.5 + intensity * 0.2);
+      }
+    }
+  }
+
+  // 4D: Wing flex under load
+  if (mainWing && mainWing.userData.hasWingFlex) {
+    const gForce = aircraftState.gForce || 1;
+    const gDelta = Math.max(-0.35, Math.min(1.0, gForce - 1));
+    if (Math.abs(gDelta - lastFlexGDelta) >= 0.02) {
+      lastFlexGDelta = gDelta;
+      const pos = mainWing.geometry.attributes.position;
+      const origY = mainWing.userData.originalY;
+      const halfSpan = mainWing.userData.wingSpan / 2;
+      const flexFactor = mainWing.userData.flexFactor ?? 0.008;
+      for (let i = 0; i < pos.count; i++) {
+        const x = pos.getX(i);
+        const spanFrac = Math.abs(x) / halfSpan;
+        const flex = gDelta * flexFactor * spanFrac * spanFrac;
+        pos.setY(i, origY[i] + flex);
+      }
+      pos.needsUpdate = true;
+    }
+  }
+
+  // Contrails (jet/fighter at high altitude/high speed)
   updateContrails();
 }
 
 function updateContrails() {
   if (!contrailLeft || !contrailRight) return;
 
-  const visible = aircraftState.altitudeAGL > 500;
+  const type = getAircraftType(aircraftState.currentType);
+  const isJetType = type.type === 'jet' || type.type === 'fighter';
+  const visible =
+    isJetType &&
+    aircraftState.altitude > 2200 &&
+    aircraftState.speed > 75 &&
+    aircraftState.throttle > 0.55;
+
   contrailLeft.visible = visible;
   contrailRight.visible = visible;
 
@@ -427,7 +562,6 @@ function updateContrails() {
     return;
   }
 
-  const type = getAircraftType(aircraftState.currentType);
   const wSpan = type.wingSpan || 14;
 
   // Get wingtip world positions
@@ -489,4 +623,12 @@ export function setCockpitVisible(visible) {
 
 export function getCockpitGroup() {
   return cockpitGroup;
+}
+
+export function hideAircraftModel() {
+  if (aircraftGroup) aircraftGroup.visible = false;
+}
+
+export function showAircraftModel() {
+  if (aircraftGroup) aircraftGroup.visible = true;
 }

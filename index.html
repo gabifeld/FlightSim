@@ -35,9 +35,10 @@
           </div>
           <div class="menu-btn" id="menu-main-settings">SETTINGS</div>
           <div class="menu-btn" id="menu-main-controls">CONTROLS</div>
+          <div class="menu-btn" id="menu-main-pilot">PILOT LOG</div>
         </div>
         <div class="menu-footer">
-          5 AIRCRAFT &middot; DYNAMIC WEATHER &middot; DAY/NIGHT CYCLE &middot; AUTOPILOT &middot; ILS LANDING
+          6 AIRCRAFT &middot; 6 AIRPORTS &middot; DYNAMIC WEATHER &middot; DAY/NIGHT &middot; AUTOPILOT &middot; ILS &middot; CAREER MODE
         </div>
       </div>
 
@@ -48,6 +49,7 @@
           <div class="menu-btn menu-btn-primary" id="menu-resume">RESUME</div>
           <div class="menu-btn" id="menu-pause-settings">SETTINGS</div>
           <div class="menu-btn" id="menu-pause-controls">CONTROLS</div>
+          <div class="menu-btn" id="menu-pause-pilot">PILOT LOG</div>
           <div class="menu-btn" id="menu-reset">RESET FLIGHT</div>
           <div class="menu-btn menu-btn-danger" id="menu-main-return">MAIN MENU</div>
         </div>
@@ -91,6 +93,15 @@
             </div>
           </div>
           <div class="settings-row">
+            <label class="settings-label">ATC RADIO</label>
+            <div class="settings-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-atc" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-row">
             <label class="settings-label">UNLIMITED FUEL</label>
             <div class="settings-control">
               <label class="toggle-switch">
@@ -106,6 +117,51 @@
                 <input type="checkbox" id="setting-fps">
                 <span class="toggle-track"></span>
               </label>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">FAILURE MODE</label>
+            <div class="settings-control">
+              <select id="setting-failures" class="settings-select">
+                <option value="off" selected>Off</option>
+                <option value="training">Training (manual)</option>
+                <option value="realistic">Realistic</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">FLIGHT REALISM</label>
+            <div class="settings-control">
+              <select id="setting-realism" class="settings-select">
+                <option value="lite" selected>Simple (Lite)</option>
+                <option value="study">Study (Realistic)</option>
+              </select>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">CAMERA SHAKE</label>
+            <div class="settings-control">
+              <input type="range" id="setting-shake" class="settings-slider" min="0" max="100" value="100">
+              <span class="settings-value" id="setting-shake-value">100%</span>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">ATC CHATTER</label>
+            <div class="settings-control">
+              <label class="toggle-switch">
+                <input type="checkbox" id="setting-chatter" checked>
+                <span class="toggle-track"></span>
+              </label>
+            </div>
+          </div>
+          <div class="settings-row">
+            <label class="settings-label">CLOUD QUALITY</label>
+            <div class="settings-control">
+              <select id="setting-clouds" class="settings-select">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high" selected>High</option>
+              </select>
             </div>
           </div>
         </div>
@@ -129,13 +185,19 @@
             <div class="controls-row"><span class="key-badge">G</span> <span class="controls-desc">Gear</span></div>
             <div class="controls-row"><span class="key-badge">F</span> <span class="controls-desc">Flaps</span></div>
             <div class="controls-row"><span class="key-badge">B</span> <span class="controls-desc">Speedbrake</span></div>
-            <div class="controls-row"><span class="key-badge">L</span> <span class="controls-desc">Landing lights</span></div>
-            <div class="controls-row"><span class="key-badge">U</span> <span class="controls-desc">Unlimited fuel</span></div>
-            <div class="controls-row"><span class="key-badge">V</span> <span class="controls-desc">Camera mode</span></div>
-            <div class="controls-row"><span class="key-badge">R</span> <span class="controls-desc">Reset</span></div>
-            <div class="controls-row"><span class="key-badge">I</span> <span class="controls-desc">Toggle ILS</span></div>
+            <div class="controls-row"><span class="key-badge">L</span> <span class="controls-desc">Lights</span></div>
+            <div class="controls-row"><span class="key-badge">U</span> <span class="controls-desc">Fuel toggle</span></div>
+            <div class="controls-row"><span class="key-badge">I</span> <span class="controls-desc">ILS toggle</span></div>
             <div class="controls-row"><span class="key-badge">K</span> <span class="controls-desc">Landing assist</span></div>
-            <div class="controls-row"><span class="key-badge">1-4</span> <span class="controls-desc">Select aircraft</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">CAMERA</div>
+            <div class="controls-row"><span class="key-badge">V</span> <span class="controls-desc">Cycle camera (Chase/Cockpit/Orbit/Flyby/Tower)</span></div>
+            <div class="controls-row"><span class="key-badge">Mouse drag</span> <span class="controls-desc">Orbit / Look</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">AIRCRAFT</div>
+            <div class="controls-row"><span class="key-badge">1</span>-<span class="key-badge">5</span> <span class="controls-desc">Select aircraft</span></div>
           </div>
           <div class="controls-section">
             <div class="controls-section-title">AUTOPILOT</div>
@@ -145,8 +207,32 @@
             <div class="controls-row"><span class="key-badge">N</span> <span class="controls-desc">Vertical speed</span></div>
             <div class="controls-row"><span class="key-badge">M</span> <span class="controls-desc">Speed hold</span></div>
             <div class="controls-row"><span class="key-badge">;</span> <span class="controls-desc">Approach mode</span></div>
-            <div class="controls-row"><span class="key-badge">&larr;&rarr;</span> <span class="controls-desc">Adjust heading</span></div>
-            <div class="controls-row"><span class="key-badge">&uarr;&darr;</span> <span class="controls-desc">Adjust altitude</span></div>
+            <div class="controls-row"><span class="key-badge">O</span> <span class="controls-desc">LNAV (flight plan)</span></div>
+            <div class="controls-row"><span class="key-badge">Y</span> <span class="controls-desc">VNAV (altitude)</span></div>
+            <div class="controls-row"><span class="key-badge">&larr;</span><span class="key-badge">&rarr;</span> <span class="controls-desc">Adjust heading</span></div>
+            <div class="controls-row"><span class="key-badge">&uarr;</span><span class="key-badge">&darr;</span> <span class="controls-desc">Adjust altitude (when AP on)</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">ENGINES &amp; ELECTRICAL</div>
+            <div class="controls-row"><span class="key-badge">Ctrl+E</span> <span class="controls-desc">Start all engines</span></div>
+            <div class="controls-row"><span class="key-badge">Ctrl+Shift+E</span> <span class="controls-desc">Shutdown engines</span></div>
+            <div class="controls-row"><span class="key-badge">Ctrl+1-4</span> <span class="controls-desc">Start engine 1-4</span></div>
+            <div class="controls-row"><span class="key-badge">Ctrl+B</span> <span class="controls-desc">Battery on/off</span></div>
+            <div class="controls-row"><span class="key-badge">Ctrl+A</span> <span class="controls-desc">Alternator on/off</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">RADIO &amp; NAV</div>
+            <div class="controls-row"><span class="key-badge">Tab</span> <span class="controls-desc">Cycle radio</span></div>
+            <div class="controls-row"><span class="key-badge">`</span> <span class="controls-desc">Swap active/standby freq</span></div>
+            <div class="controls-row"><span class="key-badge">&uarr;</span><span class="key-badge">&darr;</span> <span class="controls-desc">Tune frequency (AP off)</span></div>
+            <div class="controls-row"><span class="key-badge">Ctrl+C</span> <span class="controls-desc">Toggle checklist</span></div>
+            <div class="controls-row"><span class="key-badge">Enter</span> <span class="controls-desc">Advance checklist item</span></div>
+            <div class="controls-row"><span class="key-badge">&larr;</span><span class="key-badge">&rarr;</span> <span class="controls-desc">Switch checklist</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">ATC</div>
+            <div class="controls-row"><span class="key-badge">F1</span> <span class="controls-desc">Request / Acknowledge</span></div>
+            <div class="controls-row"><span class="key-badge">F2</span> <span class="controls-desc">Repeat last</span></div>
           </div>
           <div class="controls-section">
             <div class="controls-section-title">ENVIRONMENT</div>
@@ -155,10 +241,56 @@
             <div class="controls-row"><span class="key-badge">P</span> <span class="controls-desc">Weather preset</span></div>
             <div class="controls-row"><span class="key-badge">=</span> <span class="controls-desc">Toggle replay</span></div>
             <div class="controls-row"><span class="key-badge">+</span><span class="key-badge">-</span> <span class="controls-desc">Replay speed</span></div>
+            <div class="controls-row"><span class="key-badge">,</span><span class="key-badge">.</span> <span class="controls-desc">Sim speed</span></div>
+          </div>
+          <div class="controls-section">
+            <div class="controls-section-title">GENERAL</div>
+            <div class="controls-row"><span class="key-badge">R</span> <span class="controls-desc">Reset</span></div>
             <div class="controls-row"><span class="key-badge">Esc</span> <span class="controls-desc">Pause menu</span></div>
+            <div class="controls-row"><span class="key-badge">?</span> <span class="controls-desc">Controls help</span></div>
           </div>
         </div>
         <div class="menu-btn menu-btn-back" id="controls-back">BACK</div>
+      </div>
+
+      <!-- Pilot Log Panel -->
+      <div id="pilot-panel" class="menu-panel menu-panel-wide hidden">
+        <div class="menu-panel-title">PILOT LOG</div>
+        <div class="pilot-tabs">
+          <span class="pilot-tab active" data-tab="career">CAREER</span>
+          <span class="pilot-tab" data-tab="stats">STATS</span>
+          <span class="pilot-tab" data-tab="achievements">ACHIEVEMENTS</span>
+        </div>
+
+        <!-- Career Tab -->
+        <div id="pilot-career" class="pilot-tab-content">
+          <div class="career-rank" id="pilot-rank">STUDENT PILOT</div>
+          <div class="career-xp-bar">
+            <div class="career-xp-fill" id="pilot-xp-fill"></div>
+          </div>
+          <div class="career-xp-text" id="pilot-xp-text">0 / 1000 XP</div>
+          <div class="career-next" id="pilot-next-unlock">Next: Private Pilot</div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div id="pilot-stats" class="pilot-tab-content" style="display:none;">
+          <div class="stats-grid">
+            <div class="stats-row"><span class="stats-label">FLIGHTS</span><span class="stats-value" id="stat-flights">0</span></div>
+            <div class="stats-row"><span class="stats-label">FLIGHT TIME</span><span class="stats-value" id="stat-time">0h 0m</span></div>
+            <div class="stats-row"><span class="stats-label">LANDINGS</span><span class="stats-value" id="stat-landings">0</span></div>
+            <div class="stats-row"><span class="stats-label">CRASHES</span><span class="stats-value" id="stat-crashes">0</span></div>
+            <div class="stats-row"><span class="stats-label">BEST SCORE</span><span class="stats-value" id="stat-best">--</span></div>
+            <div class="stats-row"><span class="stats-label">AIRPORTS VISITED</span><span class="stats-value" id="stat-airports">0 / 6</span></div>
+            <div class="stats-row"><span class="stats-label">AIRCRAFT FLOWN</span><span class="stats-value" id="stat-aircraft">0 / 5</span></div>
+          </div>
+        </div>
+
+        <!-- Achievements Tab -->
+        <div id="pilot-achievements" class="pilot-tab-content" style="display:none;">
+          <div class="achievements-grid" id="achievements-list"></div>
+        </div>
+
+        <div class="menu-btn menu-btn-back" id="pilot-back">BACK</div>
       </div>
     </div>
 
@@ -351,6 +483,21 @@
       <!-- Taxi indicator -->
       <div id="hud-taxi" class="taxi-indicator" style="display: none;">TAXI</div>
 
+      <!-- ATC instruction display -->
+      <div id="hud-atc-instruction" class="atc-instruction" style="display: none;"></div>
+
+      <!-- Ground job HUD -->
+      <div id="hud-job-info" class="job-info" style="display: none;"></div>
+
+      <!-- Circuit challenge phase -->
+      <div id="hud-circuit-phase" class="circuit-phase" style="display: none;"></div>
+
+      <!-- Race mode HUD -->
+      <div id="hud-race-info" class="race-info" style="display: none;"></div>
+
+      <!-- Ground vehicle driving hint -->
+      <div id="hud-drive-hint" class="drive-hint" style="display: none;"></div>
+
       <!-- Aircraft name display -->
       <div id="hud-aircraft-name" class="aircraft-name-display">Cessna 172</div>
 
@@ -389,21 +536,61 @@
     <!-- Aircraft Selection Panel -->
     <div id="aircraft-select" class="glass-panel">
       <div class="select-title">SELECT AIRCRAFT</div>
-      <div class="aircraft-option selected" data-type="cessna_172">1. Cessna 172</div>
-      <div class="aircraft-option" data-type="boeing_737">2. Boeing 737</div>
-      <div class="aircraft-option" data-type="f16">3. F-16 Falcon</div>
-      <div class="aircraft-option" data-type="airbus_a320">4. Airbus A320</div>
-      <div class="aircraft-option" data-type="dhc2_beaver">5. DHC-2 Beaver (Seaplane)</div>
+      <div class="aircraft-option selected" data-type="cessna_172">
+        <span class="ac-number">1</span>
+        <span class="ac-name">Cessna 172</span>
+        <span class="ac-desc">Trainer</span>
+      </div>
+      <div class="aircraft-option" data-type="boeing_737">
+        <span class="ac-number">2</span>
+        <span class="ac-name">Boeing 737</span>
+        <span class="ac-desc">Airliner</span>
+      </div>
+      <div class="aircraft-option" data-type="f16">
+        <span class="ac-number">3</span>
+        <span class="ac-name">F-16 Falcon</span>
+        <span class="ac-desc">Fighter</span>
+      </div>
+      <div class="aircraft-option" data-type="airbus_a320">
+        <span class="ac-number">4</span>
+        <span class="ac-name">Airbus A320</span>
+        <span class="ac-desc">Wide-body</span>
+      </div>
+      <div class="aircraft-option" data-type="dhc2_beaver">
+        <span class="ac-number">5</span>
+        <span class="ac-name">DHC-2 Beaver</span>
+        <span class="ac-desc">Seaplane</span>
+      </div>
+      <div class="aircraft-option" data-type="extra_300">
+        <span class="ac-number">6</span>
+        <span class="ac-name">Extra 300</span>
+        <span class="ac-desc">Aerobatic</span>
+      </div>
       <div class="select-divider"></div>
-      <div class="select-title">START POSITION - AIRPORT 1</div>
-      <div class="spawn-option selected" data-spawn="runway">Runway</div>
-      <div class="spawn-option" data-spawn="gate">Gate / Hangar</div>
-      <div class="select-title">START POSITION - AIRPORT 2</div>
-      <div class="spawn-option" data-spawn="runway_apt2">Runway (Airport 2)</div>
-      <div class="spawn-option" data-spawn="gate_apt2">Gate (Airport 2)</div>
-      <div class="select-title">START POSITION - INTERNATIONAL</div>
-      <div class="spawn-option" data-spawn="runway_intl">Runway 09L (International)</div>
-      <div class="spawn-option" data-spawn="gate_intl">Gate (International)</div>
+      <div class="select-title">AIRPORTS</div>
+      <div class="spawn-grid">
+        <div class="spawn-group">
+          <div class="spawn-group-label">KFSA &mdash; Airport 1</div>
+          <div class="spawn-option selected" data-spawn="runway">Runway</div>
+          <div class="spawn-option" data-spawn="gate">Gate / Hangar</div>
+        </div>
+        <div class="spawn-group">
+          <div class="spawn-group-label">KFSB &mdash; Airport 2</div>
+          <div class="spawn-option" data-spawn="runway_apt2">Runway</div>
+          <div class="spawn-option" data-spawn="gate_apt2">Gate</div>
+        </div>
+        <div class="spawn-group">
+          <div class="spawn-group-label">KFSI &mdash; International</div>
+          <div class="spawn-option" data-spawn="runway_intl">Runway 09L</div>
+          <div class="spawn-option" data-spawn="gate_intl">Gate</div>
+        </div>
+        <div class="spawn-group">
+          <div class="spawn-group-label">Other Airports</div>
+          <div class="spawn-option" data-spawn="runway_military">Military (KFSM)</div>
+          <div class="spawn-option" data-spawn="runway_ga">GA Field (KFSG)</div>
+          <div class="spawn-option" data-spawn="runway_mountain">Mountain (KFSC)</div>
+        </div>
+      </div>
       <div class="select-divider"></div>
       <div class="select-title">LANDING CHALLENGE</div>
       <div class="spawn-option" data-spawn="short_final">Short Final (1.5nm / 500ft)</div>
@@ -416,17 +603,45 @@
       <div class="select-divider"></div>
       <div class="select-title">SPECIAL CHALLENGES</div>
       <div class="spawn-option spawn-option-challenge" data-spawn="engine_out">Engine Out Emergency</div>
-      <div class="spawn-option spawn-option-challenge" data-spawn="speedrun">Speed Run (APT1 → APT2)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="speedrun">Speed Run (APT1 &rarr; APT2)</div>
       <div class="spawn-option spawn-option-challenge" data-spawn="daily_challenge">Daily Challenge</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="full_circuit">Full Circuit (Gate to Gate)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="cargo_run">Cargo Run (APT1 &rarr; APT2)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="emergency_landing">Emergency Landing (Glide)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="touch_and_go">Touch &amp; Go (3 Landings)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="precision_approach">Precision Approach (ILS)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="progressive">Progressive Difficulty</div>
       <div class="select-divider"></div>
       <div class="select-title">BEACH / WATER</div>
       <div class="spawn-option" data-spawn="seaplane_water">Beach (Water)</div>
+      <div class="select-divider"></div>
+      <div class="select-title">NAVAL OPERATIONS</div>
+      <div class="spawn-option" data-spawn="runway_carrier">Aircraft Carrier (F-16)</div>
       <div class="select-divider"></div>
       <div class="select-title">CITY DRIVING</div>
       <div class="spawn-option spawn-option-challenge" data-spawn="city_sedan">Sedan</div>
       <div class="spawn-option spawn-option-challenge" data-spawn="city_sports">Sports Car</div>
       <div class="select-divider"></div>
-      <div class="start-btn" id="start-btn">START</div>
+      <div class="select-title">GROUND CREW JOBS</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="job_refuel">Fuel Truck Job</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="job_baggage">Baggage Job</div>
+      <div class="select-divider"></div>
+      <div class="select-title">AEROBATICS</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="stunt_challenge">Stunt Challenge (12 Gates)</div>
+      <div class="select-divider"></div>
+      <div class="select-title">RACE MODE</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="race_airport">Airport Circuit (3 laps)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="race_city">City Circuit (3 laps)</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="race_highway">Highway Sprint (1 lap)</div>
+      <div class="select-divider"></div>
+      <div class="select-title quick-challenge-title">QUICK CHALLENGE</div>
+      <div class="spawn-option spawn-option-challenge" data-spawn="quick_challenge">Random Challenge</div>
+      <div class="spawn-option spawn-option-challenge" id="seed-input-row">
+        <input type="text" id="challenge-seed-input" class="seed-input" placeholder="Enter seed..." maxlength="6" style="width:80px; text-transform:uppercase; font-family:'JetBrains Mono'; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.2); color:#fff; padding:4px 8px; border-radius:4px;">
+        <span class="controls-desc" style="margin-left:8px;">or paste a seed</span>
+      </div>
+      <div class="select-divider"></div>
+      <div class="start-btn" id="start-btn">&#9992; START FLIGHT</div>
     </div>
 
     <!-- Crash Flash Overlay -->
@@ -461,10 +676,12 @@
         <span class="key-group"><span class="key">Z</span> AP</span>
         <span class="key-group"><span class="key">I</span> ILS</span>
         <span class="key-group"><span class="key">K</span> Assist</span>
+        <span class="key-group"><span class="key">F1</span> ATC</span>
         <span class="key-sep">|</span>
         <span class="key-group"><span class="key">[</span><span class="key">]</span> Time</span>
         <span class="key-group"><span class="key">P</span> Weather</span>
         <span class="key-group"><span class="key">=</span> Replay</span>
+        <span class="key-group"><span class="key">,</span><span class="key">.</span> Speed</span>
       </div>
     </div>
     <script>
@@ -481,6 +698,8 @@
         }
       });
     </script>
+
+    <div id="celebration-container" style="position:fixed;inset:0;z-index:150;pointer-events:none;"></div>
 
     <script type="module" src="/src/main.js"></script>
   </body>

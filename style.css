@@ -654,9 +654,20 @@ body {
   transform: translate(-50%, -50%);
   z-index: 30;
   pointer-events: auto;
-  padding: 20px 28px;
+  padding: 24px 32px 20px;
   text-align: center;
   transition: opacity 0.5s ease, transform 0.5s ease;
+  max-height: 80vh;
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  mask-image: linear-gradient(to bottom, transparent 0%, black 2%, black 96%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 2%, black 96%, transparent 100%);
+  min-width: 420px;
+}
+
+#aircraft-select::-webkit-scrollbar {
+  display: none;
 }
 
 #aircraft-select.hidden {
@@ -667,91 +678,214 @@ body {
 
 .select-title {
   font-family: 'Inter', sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 4px;
-  color: rgba(160, 200, 255, 0.6);
-  margin-bottom: 16px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 5px;
+  color: rgba(160, 200, 255, 0.45);
+  margin-bottom: 10px;
+  margin-top: 18px;
   text-transform: uppercase;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
+.select-title::before,
+.select-title::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(120, 180, 255, 0.2), transparent);
+}
+
+.select-title:first-child {
+  margin-top: 0;
+  font-size: 13px;
+  letter-spacing: 6px;
+  color: rgba(180, 215, 255, 0.7);
+  margin-bottom: 14px;
+}
+
+/* ─── Aircraft Option Cards ─── */
 .aircraft-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 14px;
   font-weight: 500;
   color: rgba(200, 220, 255, 0.6);
-  padding: 10px 20px;
-  margin: 4px 0;
+  padding: 10px 16px;
+  margin: 3px 0;
   border-radius: 8px;
   cursor: pointer;
-  transition: all 0.2s;
-  border: 1px solid transparent;
+  transition: all 0.2s ease;
+  border: 1px solid rgba(100, 150, 220, 0.08);
+  border-left: 3px solid transparent;
+  text-align: left;
 }
 
 .aircraft-option:hover {
-  background: rgba(80, 140, 255, 0.15);
+  background: rgba(80, 140, 255, 0.1);
   color: #e0ecff;
-  border-color: rgba(120, 180, 255, 0.25);
+  border-color: rgba(120, 180, 255, 0.15);
+  border-left-color: rgba(80, 200, 255, 0.3);
+  transform: scale(1.01);
 }
 
 .aircraft-option.selected {
-  background: rgba(80, 140, 255, 0.2);
+  background: rgba(40, 140, 220, 0.12);
   color: #55ccff;
-  border-color: rgba(80, 180, 255, 0.4);
-  text-shadow: 0 0 8px rgba(80, 200, 255, 0.3);
+  border-color: rgba(80, 180, 255, 0.2);
+  border-left-color: #55ccff;
+  text-shadow: 0 0 8px rgba(80, 200, 255, 0.25);
 }
 
+.ac-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(80, 140, 255, 0.1);
+  border: 1px solid rgba(100, 160, 255, 0.15);
+  font-size: 11px;
+  font-weight: 700;
+  color: rgba(160, 200, 255, 0.5);
+  flex-shrink: 0;
+}
+
+.aircraft-option.selected .ac-number {
+  background: rgba(40, 160, 255, 0.2);
+  border-color: rgba(80, 200, 255, 0.35);
+  color: #55ccff;
+}
+
+.ac-name {
+  flex: 1;
+  font-weight: 600;
+}
+
+.ac-desc {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: rgba(160, 200, 255, 0.35);
+  flex-shrink: 0;
+}
+
+.aircraft-option.selected .ac-desc {
+  color: rgba(85, 204, 255, 0.5);
+}
+
+/* ─── Spawn Grid (2-column airport layout) ─── */
+.spawn-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.spawn-group {
+  background: rgba(20, 40, 80, 0.15);
+  border: 1px solid rgba(100, 150, 220, 0.08);
+  border-radius: 8px;
+  padding: 8px 6px 6px;
+}
+
+.spawn-group-label {
+  font-family: 'Inter', sans-serif;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: rgba(160, 200, 255, 0.35);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+  padding: 0 6px;
+}
+
+/* ─── Spawn Options ─── */
 .spawn-option {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
-  color: rgba(200, 220, 255, 0.6);
-  padding: 8px 20px;
-  margin: 4px 0;
-  border-radius: 8px;
+  color: rgba(200, 220, 255, 0.55);
+  padding: 6px 14px 6px 20px;
+  margin: 2px 0;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all 0.2s ease;
   border: 1px solid transparent;
+  position: relative;
+  text-align: left;
+}
+
+.spawn-option::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(120, 180, 255, 0.15);
+  transition: all 0.2s;
 }
 
 .spawn-option:hover {
-  background: rgba(80, 140, 255, 0.15);
+  background: rgba(80, 140, 255, 0.1);
   color: #e0ecff;
-  border-color: rgba(120, 180, 255, 0.25);
+}
+
+.spawn-option:hover::before {
+  background: rgba(120, 180, 255, 0.4);
 }
 
 .spawn-option.selected {
-  background: rgba(80, 140, 255, 0.2);
+  background: rgba(40, 140, 220, 0.1);
   color: #55ccff;
-  border-color: rgba(80, 180, 255, 0.4);
-  text-shadow: 0 0 8px rgba(80, 200, 255, 0.3);
+  text-shadow: 0 0 6px rgba(80, 200, 255, 0.2);
 }
 
+.spawn-option.selected::before {
+  background: #55ccff;
+  box-shadow: 0 0 6px rgba(85, 204, 255, 0.5);
+}
+
+/* ─── Dividers ─── */
 .select-divider {
   height: 1px;
-  background: rgba(120, 180, 255, 0.12);
-  margin: 12px 0;
+  background: linear-gradient(90deg, transparent, rgba(120, 180, 255, 0.15), transparent);
+  margin: 10px 0;
 }
 
+/* ─── Start Button ─── */
 .start-btn {
   font-family: 'JetBrains Mono', monospace;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 3px;
-  color: #e0ecff;
-  padding: 12px 32px;
-  margin-top: 8px;
-  border-radius: 8px;
+  letter-spacing: 4px;
+  color: #ffffff;
+  padding: 14px 40px;
+  margin-top: 12px;
+  border-radius: 10px;
   cursor: pointer;
-  border: 1px solid rgba(80, 180, 255, 0.4);
-  background: rgba(40, 100, 220, 0.25);
-  transition: all 0.2s;
+  border: 1px solid rgba(80, 180, 255, 0.35);
+  background: linear-gradient(135deg, rgba(30, 100, 220, 0.4), rgba(20, 60, 180, 0.5));
+  transition: all 0.25s ease;
+  text-shadow: 0 0 12px rgba(80, 200, 255, 0.4);
 }
 
 .start-btn:hover {
-  background: rgba(60, 130, 255, 0.35);
+  background: linear-gradient(135deg, rgba(40, 120, 255, 0.55), rgba(30, 80, 220, 0.65));
   border-color: rgba(100, 200, 255, 0.6);
-  text-shadow: 0 0 10px rgba(80, 200, 255, 0.5);
+  text-shadow: 0 0 16px rgba(80, 200, 255, 0.7);
+  box-shadow: 0 0 24px rgba(40, 120, 255, 0.25), inset 0 0 12px rgba(80, 180, 255, 0.1);
+  transform: scale(1.02);
 }
 
 /* ─── ILS Approach Indicator ─── */
@@ -1946,24 +2080,46 @@ body {
    CHALLENGE MODES
    ═══════════════════════════════════════════ */
 
-/* ─── Aircraft Select overflow fix ─── */
-#aircraft-select {
-  max-height: 80vh;
-  overflow-y: auto;
-}
-
 /* ─── Challenge spawn option accent ─── */
 .spawn-option-challenge {
-  border-left: 2px solid rgba(255, 170, 51, 0.3);
-  padding-left: 18px;
+  border-left: 2px solid rgba(255, 170, 51, 0.2);
+  padding-left: 22px;
+  background: rgba(255, 170, 51, 0.02);
+}
+
+.spawn-option-challenge::before {
+  background: rgba(255, 170, 51, 0.2);
 }
 
 .spawn-option-challenge:hover {
-  border-left-color: rgba(255, 170, 51, 0.6);
+  border-left-color: rgba(255, 170, 51, 0.5);
+  background: rgba(255, 170, 51, 0.06);
+}
+
+.spawn-option-challenge:hover::before {
+  background: rgba(255, 170, 51, 0.5);
 }
 
 .spawn-option-challenge.selected {
   border-left-color: #ffaa33;
+  background: rgba(255, 170, 51, 0.08);
+  color: #ffcc66;
+  text-shadow: 0 0 6px rgba(255, 170, 51, 0.3);
+}
+
+.spawn-option-challenge.selected::before {
+  background: #ffaa33;
+  box-shadow: 0 0 6px rgba(255, 170, 51, 0.5);
+}
+
+/* ─── Quick Challenge highlight ─── */
+.quick-challenge-title {
+  color: rgba(255, 200, 100, 0.5);
+}
+
+.quick-challenge-title::before,
+.quick-challenge-title::after {
+  background: linear-gradient(90deg, transparent, rgba(255, 170, 51, 0.2), transparent);
 }
 
 /* ─── Speedrun Timer ─── */
@@ -2180,4 +2336,288 @@ body {
 #hud.hud-off .aircraft-name-display,
 #hud.hud-off .time-display {
   display: none !important;
+}
+
+/* ═══════════════════════════════════════════
+   ATC & GROUND JOB HUD
+   ═══════════════════════════════════════════ */
+
+/* ATC instruction display */
+.atc-instruction {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 40, 0, 0.85);
+  color: #00ff88;
+  padding: 6px 18px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  z-index: 100;
+  pointer-events: none;
+  border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+/* Ground job HUD */
+.job-info {
+  position: fixed;
+  bottom: 110px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(40, 30, 0, 0.85);
+  color: #ffcc00;
+  padding: 6px 18px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  z-index: 100;
+  pointer-events: none;
+  border: 1px solid rgba(255, 204, 0, 0.3);
+}
+
+/* Circuit challenge phase display */
+.circuit-phase {
+  position: fixed;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 20, 60, 0.9);
+  color: #66bbff;
+  padding: 8px 24px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  z-index: 100;
+  pointer-events: none;
+  border: 1px solid rgba(102, 187, 255, 0.4);
+  text-align: center;
+}
+
+/* Ground vehicle driving hint */
+.drive-hint {
+  position: fixed;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(30, 30, 30, 0.8);
+  color: #aaddaa;
+  padding: 5px 16px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  z-index: 100;
+  pointer-events: none;
+}
+
+/* ─── Race Mode HUD ─── */
+.race-info {
+  position: fixed;
+  top: 50px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(60, 0, 0, 0.9);
+  color: #ff4444;
+  padding: 8px 24px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  z-index: 100;
+  pointer-events: none;
+  border: 1px solid rgba(255, 68, 68, 0.5);
+  text-shadow: 0 0 8px rgba(255, 0, 0, 0.5);
+}
+
+/* ─── Pilot Log Panel ─── */
+.pilot-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.pilot-tab {
+  padding: 6px 14px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.pilot-tab:hover {
+  color: rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.1);
+}
+.pilot-tab.active {
+  color: #4fc3f7;
+  background: rgba(79, 195, 247, 0.12);
+  border-color: rgba(79, 195, 247, 0.3);
+}
+.career-rank {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 18px;
+  font-weight: 700;
+  color: #4fc3f7;
+  letter-spacing: 2px;
+  margin-bottom: 12px;
+}
+.career-xp-bar {
+  width: 100%;
+  height: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.career-xp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #4fc3f7, #81d4fa);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+  width: 0%;
+}
+.career-xp-text {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  margin-bottom: 8px;
+}
+.career-next {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.35);
+}
+.stats-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.stats-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 1px;
+  color: rgba(255, 255, 255, 0.45);
+}
+.stats-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 13px;
+  font-weight: 700;
+  color: #e0e0e0;
+}
+.achievements-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.achievement-item {
+  position: relative;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+}
+.achievement-item.unlocked {
+  background: rgba(79, 195, 247, 0.08);
+  border-color: rgba(79, 195, 247, 0.2);
+}
+.achievement-item.locked {
+  opacity: 0.45;
+}
+.achievement-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 700;
+  color: #e0e0e0;
+  margin-bottom: 2px;
+}
+.achievement-desc {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.4);
+}
+.achievement-badge {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  font-size: 14px;
+  color: #4fc3f7;
+}
+.seed-input {
+  font-family: 'JetBrains Mono', monospace !important;
+}
+
+/* ═══════════════════════════════════════════
+   Celebration Animations
+   ═══════════════════════════════════════════ */
+
+@keyframes cel-slideInLeft {
+  from { transform: translateX(-100%); opacity: 0; }
+  to   { transform: translateX(0);     opacity: 1; }
+}
+
+@keyframes cel-slideInRight {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes cel-slideOutLeft {
+  from { transform: translateX(0);     opacity: 1; }
+  to   { transform: translateX(-100%); opacity: 0; }
+}
+
+@keyframes cel-slideOutRight {
+  from { transform: translateX(0);    opacity: 1; }
+  to   { transform: translateX(100%); opacity: 0; }
+}
+
+@keyframes cel-bounceIn {
+  0%   { transform: scale(0);   }
+  60%  { transform: scale(1.2); }
+  100% { transform: scale(1);   }
+}
+
+@keyframes cel-punchIn {
+  0%   { transform: scale(3); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes cel-pulseGlow {
+  0%, 100% { text-shadow: 0 0 10px currentColor; }
+  50%      { text-shadow: 0 0 30px currentColor, 0 0 60px currentColor; }
+}
+
+@keyframes cel-countUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0);    }
+}
+
+@keyframes cel-confetti {
+  0%   { transform: translate(0, 0) rotate(0deg);                   opacity: 1; }
+  100% { transform: translate(var(--tx), var(--ty)) rotate(720deg); opacity: 0; }
+}
+
+@keyframes cel-letterSpacing {
+  from { letter-spacing: 0;   }
+  to   { letter-spacing: 4px; }
 }

@@ -18,9 +18,12 @@ const defaults = {
   timeOfDay: 12.0,
   mapboxApiKey: '',
   gpwsEnabled: true,
+  atcEnabled: true,
   autoCycleTime: false,
   unlimitedFuel: true,
   hudMode: 'full', // 'full', 'minimal', 'off'
+  realism: 'lite', // 'lite', 'study'
+  cameraShakeScale: 1.0,
 };
 
 let settings = { ...defaults };

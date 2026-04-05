@@ -1,4 +1,4 @@
-import { getActiveVehicle, isAircraft } from './vehicleState.js';
+import { getActiveVehicle, isAircraft, isCar } from './vehicleState.js';
 import { getKeys } from './controls.js';
 import { getWeatherState } from './weather.js';
 import { getAircraftType } from './aircraftTypes.js';
@@ -24,6 +24,15 @@ import { getRoadNetwork } from './city.js';
 import { getTerrainHeightCached, getCloudDensity, getHighwayPath } from './terrain.js';
 import { getSetting, setSetting } from './settings.js';
 import { radToDeg } from './utils.js';
+import { getRadioStack, getNavReceiver, getSelectedRadioName } from './radio.js';
+import { getActiveWaypoint as getFPActiveWaypoint, getBearingToActive, getDistanceToActiveNM } from './flightplan.js';
+import { getEngineCount, getAllEngineStates, isAnyEngineRunning } from './systemsEngine.js';
+import { getBatteryCharge, getBusVoltage, isAvionicsPowered, isInstrumentsPowered, getElectricalState } from './electrical.js';
+import { getActiveFailures } from './failures.js';
+import { AIRPORTS } from './airportData.js';
+import { getATCState, getATCInstruction } from './atc.js';
+import { getJobState, isJobActive } from './groundJobs.js';
+import { isRaceActive, getRaceState, formatRaceTime } from './raceMode.js';
 
 let els = {};
 let minimapCtx = null;
@@ -148,6 +157,33 @@ export function initHUD() {
     }
   });
 
+  // Create systems info strip (radio, engine, electrical)
+  const hudContainer2 = document.getElementById('hud');
+  if (hudContainer2) {
+    const sysStrip = document.createElement('div');
+    sysStrip.id = 'systems-strip';
+    sysStrip.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:40;font-family:monospace;font-size:11px;color:#ccc;text-align:center;pointer-events:none;display:flex;gap:12px;background:rgba(0,0,0,0.5);padding:3px 10px;border-radius:4px;';
+    const radioSpan = document.createElement('span');
+    radioSpan.id = 'sys-radio';
+    const engSpan = document.createElement('span');
+    engSpan.id = 'sys-engines';
+    const elecSpan = document.createElement('span');
+    elecSpan.id = 'sys-elec';
+    const cautionSpan = document.createElement('span');
+    cautionSpan.id = 'sys-caution';
+    cautionSpan.style.cssText = 'color:#ffaa00;font-weight:bold;';
+    sysStrip.appendChild(radioSpan);
+    sysStrip.appendChild(engSpan);
+    sysStrip.appendChild(elecSpan);
+    sysStrip.appendChild(cautionSpan);
+    hudContainer2.appendChild(sysStrip);
+    els.sysRadio = radioSpan;
+    els.sysEngines = engSpan;
+    els.sysElec = elecSpan;
+    els.sysCaution = cautionSpan;
+    els.sysStrip = sysStrip;
+  }
+
   // Pre-create landing assist indicator
   const hudContainer = document.getElementById('hud');
   if (hudContainer) {
@@ -242,25 +278,36 @@ export function updateHUD(flightState) {
   const keys = getKeys();
   const isAircraftVehicle = isAircraft(state);
 
-  // Flight data
-  const speedKts = Math.round(state.speed * MS_TO_KNOTS);
-  if (els.speed) els.speed.textContent = speedKts;
-  if (els.altitude) els.altitude.textContent = Math.round(state.altitude * M_TO_FEET);
+  // Power loss — show dashes for aircraft instruments when unpowered
+  const instrumentsOff = isAircraftVehicle && !isInstrumentsPowered();
 
-  if (els.heading) els.heading.textContent = String(Math.round(state.heading)).padStart(3, '0');
+  // Speed display: knots for aircraft, mph for cars
+  // Deadband: below 5 knots / 6 mph, hold at 0 to prevent jitter from float noise
+  let speedDisplay;
+  if (isAircraftVehicle) {
+    const rawKts = state.speed * MS_TO_KNOTS;
+    speedDisplay = rawKts < 5 ? 0 : Math.round(rawKts);
+  } else {
+    const rawMph = Math.abs(state.speed) * 2.237;
+    speedDisplay = rawMph < 6 ? 0 : Math.round(rawMph);
+  }
+  if (els.speed) els.speed.textContent = instrumentsOff ? '---' : speedDisplay;
+  if (els.altitude) els.altitude.textContent = instrumentsOff ? '-----' : Math.round(state.altitude * M_TO_FEET);
+
+  if (els.heading) els.heading.textContent = instrumentsOff ? '---' : String(Math.round(state.heading)).padStart(3, '0');
 
   // Speed tape
-  updateSpeedTape(speedKts);
+  updateSpeedTape(speedDisplay);
 
   // Throttle
   const thrPct = Math.round(state.throttle * 100);
-  if (els.throttle) els.throttle.textContent = thrPct + '%';
-  if (els.throttleBar) els.throttleBar.style.width = thrPct + '%';
+  if (els.throttle) els.throttle.textContent = instrumentsOff ? '--' : thrPct + '%';
+  if (els.throttleBar) els.throttleBar.style.width = (instrumentsOff ? 0 : thrPct) + '%';
 
   // Flight-specific HUD (aircraft only)
   if (isAircraftVehicle) {
     const vs = Math.round(state.verticalSpeed * MS_TO_FPM);
-    if (els.vspeed) { els.vspeed.textContent = (vs > 0 ? '+' : '') + vs; els.vspeed.parentElement && (els.vspeed.style.display = ''); }
+    if (els.vspeed) { els.vspeed.textContent = instrumentsOff ? '---' : (vs > 0 ? '+' : '') + vs; els.vspeed.parentElement && (els.vspeed.style.display = ''); }
 
     if (els.gear) {
       els.gear.textContent = state.gear ? 'DOWN' : 'UP';
@@ -275,9 +322,15 @@ export function updateHUD(flightState) {
       els.speedbrake.className = 'sys-status ' + (state.speedbrake ? 'active' : 'off');
     }
     if (els.horizon) {
-      const pitch = radToDeg(state.euler.x);
-      const roll = radToDeg(state.euler.z);
-      els.horizon.style.transform = `translateY(${pitch * 1.5}px) rotate(${-roll}deg)`;
+      if (instrumentsOff) {
+        els.horizon.style.transform = '';
+        els.horizon.style.opacity = '0.2';
+      } else {
+        els.horizon.style.opacity = '1';
+        const pitch = radToDeg(state.euler.x);
+        const roll = radToDeg(state.euler.z);
+        els.horizon.style.transform = `translateY(${pitch * 1.5}px) rotate(${-roll}deg)`;
+      }
     }
     if (els.aoa) {
       const aoaDeg = radToDeg(state.aoa);
@@ -304,7 +357,7 @@ export function updateHUD(flightState) {
   }
 
   // Brake
-  const braking = keys[' '] && state.onGround;
+  const braking = (keys[' '] || (!isAircraftVehicle && (keys['s'] || keys['arrowdown']))) && state.onGround;
   if (els.brake) {
     els.brake.textContent = braking ? 'ON' : 'OFF';
     els.brake.className = 'sys-status ' + (braking ? 'active' : 'off');
@@ -378,6 +431,14 @@ export function updateHUD(flightState) {
   if (isAircraftVehicle) updateAPPanel();
   else if (els.apPanel) els.apPanel.style.display = 'none';
 
+  // Systems strip (aircraft only)
+  if (isAircraftVehicle && els.sysStrip) {
+    els.sysStrip.style.display = 'flex';
+    updateSystemsStrip(state);
+  } else if (els.sysStrip) {
+    els.sysStrip.style.display = 'none';
+  }
+
   // Landing assist indicator (aircraft only)
   if (els.landingAssist) {
     els.landingAssist.style.display = isLandingAssistActive() ? 'block' : 'none';
@@ -439,6 +500,169 @@ export function updateHUD(flightState) {
 
   // ILS guidance
   updateILS(state);
+
+  // ATC instruction display
+  const atcState = getATCState();
+  const atcEl = document.getElementById('hud-atc-instruction');
+  if (atcEl) {
+    const instruction = getATCInstruction();
+    atcEl.textContent = instruction || '';
+    atcEl.style.display = instruction ? 'block' : 'none';
+  }
+
+  // Job HUD
+  const jobEl = document.getElementById('hud-job-info');
+  if (jobEl) {
+    if (isJobActive()) {
+      const job = getJobState();
+      jobEl.textContent = `JOB: ${job.type.toUpperCase()} - ${job.phase.toUpperCase()} - ${Math.floor(job.timer)}s`;
+      jobEl.style.display = 'block';
+    } else {
+      jobEl.style.display = 'none';
+    }
+  }
+
+  // Race HUD
+  const raceEl = document.getElementById('hud-race-info');
+  if (raceEl) {
+    if (isRaceActive()) {
+      const rs = getRaceState();
+      const lapTimeStr = formatRaceTime(rs.lapTimer);
+      const totalStr = formatRaceTime(rs.raceTimer);
+      const bestStr = rs.bestLap > 0 ? formatRaceTime(rs.bestLap) : '--:--.--';
+      raceEl.textContent = `LAP ${rs.lap + 1}/${rs.totalLaps} | CP ${rs.currentCP + 1}/${rs.totalCPs} | Lap: ${lapTimeStr} | Total: ${totalStr} | Best: ${bestStr}`;
+      raceEl.style.display = 'block';
+    } else {
+      raceEl.style.display = 'none';
+    }
+  }
+
+  // Ground vehicle controls hint (shown when driving, not during active job)
+  const driveHintEl = document.getElementById('hud-drive-hint');
+  if (driveHintEl) {
+    const av = getActiveVehicle();
+    if (isCar(av) && !isJobActive()) {
+      driveHintEl.textContent = 'W=Forward S=Brake/Reverse A/D=Steer L=Lights';
+      driveHintEl.style.display = 'block';
+    } else {
+      driveHintEl.style.display = 'none';
+    }
+  }
+
+  // Circuit challenge phase display (also used for other challenge HUD messages)
+  const circuitEl = document.getElementById('hud-circuit-phase');
+  if (circuitEl) {
+    const challenge = getActiveChallenge();
+    if (challenge === 'full_circuit') {
+      const cs = getChallengeState();
+      const phaseLabels = {
+        pushback: 'REQUEST PUSHBACK (F1)',
+        taxi: 'TAXI TO RUNWAY - USE ATC (F1)',
+        takeoff: 'TAKEOFF - CLIMB TO PATTERN ALT (300m)',
+        pattern: 'FLY PATTERN - TURN BASE & FINAL TO LAND',
+        landing: 'LANDED - TAXI TO GATE',
+        taxi_in: 'TAXI TO GATE AREA (x>300)',
+        complete: 'CIRCUIT COMPLETE!',
+      };
+      const label = phaseLabels[cs.circuitPhase] || cs.circuitPhase;
+      let text = `CIRCUIT: ${label} | ${formatTime(cs.circuitTimer)} | VIOLATIONS: ${cs.circuitViolations}`;
+      if (cs.circuitPhaseMessage) {
+        text += ` | ${cs.circuitPhaseMessage}`;
+      }
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'cargo_run') {
+      const cs = getChallengeState();
+      if (!cs.cargoRunFinished) {
+        circuitEl.textContent = `CARGO RUN: FLY TO AIRPORT 2 (8km NE) | ${formatTime(cs.cargoRunTimer)}`;
+      } else {
+        circuitEl.textContent = `CARGO RUN COMPLETE: ${formatTime(cs.cargoRunTimer)}`;
+      }
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'emergency_landing') {
+      const cs = getChallengeState();
+      if (cs.emergencyLandingActive) {
+        circuitEl.textContent = 'EMERGENCY: ALL ENGINES FAILED - GLIDE TO ANY RUNWAY';
+      } else {
+        circuitEl.textContent = 'EMERGENCY LANDING COMPLETE';
+      }
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'crosswind') {
+      const cs = getChallengeState();
+      let text = `CROSSWIND: ${cs.level ? cs.level.toUpperCase() : ''}`;
+      if (cs.crosswindGustActive) {
+        text += ' | GUST!';
+      }
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'engine_out') {
+      const cs = getChallengeState();
+      if (cs.engineFireWarningShown && cs.engineFireWarningTimer > 0) {
+        circuitEl.textContent = 'WARNING: ENGINE FIRE DETECTED';
+        circuitEl.style.display = 'block';
+      } else if (cs.engineFailed) {
+        circuitEl.textContent = 'ENGINE FAILED - LAND NOW';
+        circuitEl.style.display = 'block';
+      } else {
+        circuitEl.textContent = 'ENGINE OUT CHALLENGE - FLY THE APPROACH';
+        circuitEl.style.display = 'block';
+      }
+    } else if (challenge === 'speedrun') {
+      const cs = getChallengeState();
+      let text = `SPEEDRUN: ${formatTime(cs.speedrunTimer)}`;
+      const splits = cs.speedrunSplits;
+      if (splits[0] !== null) text += ` | DEPART: ${formatTime(splits[0])}`;
+      if (splits[1] !== null) text += ` | MID: ${formatTime(splits[1])}`;
+      if (splits[2] !== null) text += ` | APPROACH: ${formatTime(splits[2])}`;
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'daily') {
+      const cs = getChallengeState();
+      if (cs.dailyParams && cs.dailyParScore) {
+        circuitEl.textContent = `DAILY CHALLENGE | PAR: ${cs.dailyParScore}`;
+        circuitEl.style.display = 'block';
+      } else {
+        circuitEl.style.display = 'none';
+      }
+    } else if (challenge === 'touch_and_go') {
+      const cs = getChallengeState();
+      let text = `TOUCH & GO: ${cs.tagCount}/3 | ${formatTime(cs.tagTimer)}`;
+      if (cs.tagMessage) text += ` | ${cs.tagMessage}`;
+      if (cs.tagPhase === 'complete') text = cs.tagMessage;
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'precision_approach') {
+      const cs = getChallengeState();
+      let text = cs.precisionMessage || 'PRECISION APPROACH';
+      if (cs.precisionSamples && cs.precisionSamples.length > 0 && cs.precisionTracking) {
+        text += ` | SAMPLES: ${cs.precisionSamples.length}`;
+      }
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'progressive') {
+      const cs = getChallengeState();
+      let text = cs.progressiveMessage || `PROGRESSIVE: LEVEL ${cs.progressiveLevel + 1}/5`;
+      if (!cs.progressiveComplete) {
+        text = `LEVEL ${cs.progressiveLevel + 1}/5 | ${text}`;
+      }
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else if (challenge === 'stunt') {
+      const cs = getChallengeState();
+      let text;
+      if (cs.stuntComplete) {
+        text = cs.stuntMessage || `STUNT COMPLETE! SCORE: ${cs.stuntScore}`;
+      } else if (cs.stuntMessage && cs.stuntMessageTimer > 0) {
+        text = cs.stuntMessage;
+      } else {
+        text = `GATE ${cs.stuntCurrentGate}/${cs.stuntTotalGates} -- SCORE: ${cs.stuntScore} | ${formatTime(cs.stuntTimer)}`;
+      }
+      circuitEl.textContent = text;
+      circuitEl.style.display = 'block';
+    } else {
+      circuitEl.style.display = 'none';
+    }
+  }
 
   // State
   if (els.state) els.state.textContent = flightState;
@@ -562,6 +786,71 @@ function updateChallengeHUD() {
   }
 }
 
+function updateSystemsStrip() {
+  // Radio info
+  if (els.sysRadio) {
+    const radio = getRadioStack();
+    const nav1 = getNavReceiver(0);
+    const selName = getSelectedRadioName();
+    let radioText = `${selName} `;
+    if (nav1.receiving) {
+      radioText += `NAV1:${radio.nav1.active.toFixed(2)} ${nav1.ident}`;
+      if (nav1.dmeDistance !== null) radioText += ` ${nav1.dmeDistance.toFixed(1)}nm`;
+    } else {
+      radioText += `NAV1:${radio.nav1.active.toFixed(2)} ---`;
+    }
+    els.sysRadio.textContent = radioText;
+  }
+
+  // Engine N1 readouts
+  if (els.sysEngines) {
+    const count = getEngineCount();
+    const states = getAllEngineStates();
+    let engText = '';
+    for (let i = 0; i < count; i++) {
+      const e = states[i];
+      if (i > 0) engText += ' ';
+      engText += `E${i + 1}:${Math.round(e.n1)}%`;
+    }
+    els.sysEngines.textContent = engText;
+  }
+
+  // Electrical warnings
+  if (els.sysElec) {
+    const elec = getElectricalState();
+    let elecText = '';
+    if (elec.busVoltage < 20 && elec.busVoltage > 0) {
+      elecText = 'LOW VOLTAGE';
+    } else if (!elec.alternatorOn || elec.busVoltage < 28) {
+      if (elec.batteryOn && elec.batteryCharge < 0.3) elecText = 'BATT LOW';
+      else if (!elec.alternatorOn && elec.batteryOn) elecText = 'BATT ONLY';
+    }
+    els.sysElec.textContent = elecText;
+    els.sysElec.style.color = elecText ? '#ffaa00' : '#888';
+  }
+
+  // MASTER CAUTION for active failures
+  if (els.sysCaution) {
+    const failures = getActiveFailures();
+    if (failures.length > 0) {
+      els.sysCaution.textContent = 'MASTER CAUTION';
+    } else {
+      els.sysCaution.textContent = '';
+    }
+  }
+
+  // Flight plan waypoint (from flightplan.js, not the old HUD waypoints)
+  if (els.waypoint) {
+    const fpWp = getFPActiveWaypoint();
+    if (fpWp) {
+      const brg = Math.round(getBearingToActive());
+      const dist = getDistanceToActiveNM().toFixed(1);
+      els.waypoint.textContent = `${fpWp.name} \u2192 ${String(brg).padStart(3, '0')}\u00B0 ${dist}nm`;
+      els.waypoint.style.display = '';
+    }
+  }
+}
+
 function updateAPPanel() {
   if (!els.apPanel) return;
 
@@ -588,10 +877,10 @@ function updateAPPanel() {
     els.apApr.className = 'ap-mode' + (ap.aprMode ? ' active' : '');
   }
   if (els.apTargetHdg) {
-    els.apTargetHdg.textContent = `HDG ${Math.round(ap.targetHeading)}`;
+    els.apTargetHdg.textContent = ap.lnavMode ? 'LNAV' : `HDG ${Math.round(ap.targetHeading)}`;
   }
   if (els.apTargetAlt) {
-    els.apTargetAlt.textContent = `ALT ${Math.round(ap.targetAltitude)}ft`;
+    els.apTargetAlt.textContent = ap.vnavMode ? 'VNAV' : `ALT ${Math.round(ap.targetAltitude)}ft`;
   }
 }
 
@@ -704,7 +993,7 @@ function renderTerrainImage() {
   const ctx = canvas.getContext('2d');
   const imageData = ctx.createImageData(size, size);
   const data = imageData.data;
-  const worldRange = 20000; // covers full terrain for overview mode
+  const worldRange = 42000; // covers expanded map with new airports
 
   for (let y = 0; y < size; y++) {
     for (let x = 0; x < size; x++) {
@@ -715,22 +1004,34 @@ function renderTerrainImage() {
 
       if (h < 0.5) {
         // Water
-        data[idx] = 20; data[idx+1] = 40; data[idx+2] = 80; data[idx+3] = 255;
-      } else if (h < 30) {
-        // Low green
-        data[idx] = 35; data[idx+1] = 70 + h; data[idx+2] = 30; data[idx+3] = 255;
-      } else if (h < 100) {
-        // Mid brown-green
-        const t = (h - 30) / 70;
-        data[idx] = 35 + t * 60; data[idx+1] = 70 + h * 0.3; data[idx+2] = 30 + t * 20; data[idx+3] = 255;
-      } else if (h < 250) {
-        // Brown-gray
-        const t = (h - 100) / 150;
-        data[idx] = 95 + t * 30; data[idx+1] = 80 + t * 20; data[idx+2] = 55 + t * 30; data[idx+3] = 255;
+        data[idx] = 15; data[idx+1] = 35; data[idx+2] = 75; data[idx+3] = 255;
+      } else if (h < 5) {
+        // Beach sand
+        data[idx] = 140; data[idx+1] = 130; data[idx+2] = 95; data[idx+3] = 255;
+      } else if (h < 25) {
+        // Light grass
+        const t = (h - 5) / 20;
+        data[idx] = 55 + t * (-10); data[idx+1] = 100 + t * 20; data[idx+2] = 40; data[idx+3] = 255;
+      } else if (h < 55) {
+        // Rich grass / forest
+        const t = (h - 25) / 30;
+        data[idx] = 38 - t * 15; data[idx+1] = 80 + t * 10; data[idx+2] = 30 - t * 8; data[idx+3] = 255;
+      } else if (h < 110) {
+        // Scrubland to dirt
+        const t = (h - 55) / 55;
+        data[idx] = 60 + t * 50; data[idx+1] = 65 + t * 15; data[idx+2] = 35 + t * 20; data[idx+3] = 255;
+      } else if (h < 200) {
+        // Rocky highlands
+        const t = (h - 110) / 90;
+        data[idx] = 100 + t * 20; data[idx+1] = 95 + t * 15; data[idx+2] = 85 + t * 15; data[idx+3] = 255;
+      } else if (h < 300) {
+        // Dark rock to alpine
+        const t = (h - 200) / 100;
+        data[idx] = 90 + t * 40; data[idx+1] = 85 + t * 45; data[idx+2] = 82 + t * 50; data[idx+3] = 255;
       } else {
-        // Gray-white peaks
-        const t = Math.min((h - 250) / 150, 1);
-        data[idx] = 125 + t * 100; data[idx+1] = 120 + t * 100; data[idx+2] = 115 + t * 110; data[idx+3] = 255;
+        // Snow/ice
+        const t = Math.min((h - 300) / 80, 1);
+        data[idx] = 130 + t * 110; data[idx+1] = 135 + t * 108; data[idx+2] = 140 + t * 105; data[idx+3] = 255;
       }
     }
   }
@@ -827,6 +1128,40 @@ function updateMinimap() {
   ctx.fillStyle = 'rgba(100, 100, 100, 0.7)';
   ctx.fillRect(toX(INTL_AIRPORT_X) - intlRw/2, toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2), intlRw, intlRl);
 
+  // ── Data-driven airports (new airports from airportData) ──
+  for (const apt of AIRPORTS) {
+    if (apt._existing) continue;
+    const rwy = apt.runways[0];
+    const rLen = Math.max(4, rwy.length * scale);
+    const rWid = Math.max(3, rwy.width * scale);
+    const headingRad = ((rwy.heading - 90) * Math.PI) / 180;
+    const cx = toX(apt.x);
+    const cy = toY(apt.z);
+    if (cx < -50 || cx > w + 50 || cy < -50 || cy > h + 50) continue;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(headingRad);
+    ctx.fillStyle = apt.type === 'military' ? 'rgba(160, 160, 80, 0.9)' : 'rgba(150, 150, 150, 0.8)';
+    ctx.fillRect(-rWid / 2, -rLen / 2, rWid, rLen);
+    ctx.restore();
+    // Marker dot for visibility at any zoom
+    ctx.fillStyle = apt.type === 'military' ? '#aaaa44' : '#aaaaaa';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Runway numbers
+  ctx.font = 'bold 8px sans-serif';
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  ctx.textAlign = 'center';
+  // Airport 1: Runway 36/18 (N-S)
+  ctx.fillText('36', toX(0), toY(-RUNWAY_LENGTH/2 + 60));
+  ctx.fillText('18', toX(0), toY(RUNWAY_LENGTH/2 - 40));
+  // Airport 2: Runway 36/18 (N-S)
+  ctx.fillText('36', toX(AIRPORT2_X), toY(AIRPORT2_Z - RUNWAY_LENGTH/2 + 60));
+  ctx.fillText('18', toX(AIRPORT2_X), toY(AIRPORT2_Z + RUNWAY_LENGTH/2 - 40));
+
   // ── Bayview city zone ──
   ctx.fillStyle = 'rgba(60, 60, 80, 0.4)';
   ctx.fillRect(toX(CT_CENTER_X - CT_SIZE_X/2), toY(CT_CENTER_Z - CT_SIZE_Z/2), CT_SIZE_X * scale, CT_SIZE_Z * scale);
@@ -916,6 +1251,17 @@ function updateMinimap() {
 
   // INTL label
   ctx.fillText('INTL', toX(INTL_AIRPORT_X), toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2 - 80));
+
+  // New airport labels
+  for (const apt of AIRPORTS) {
+    if (apt._existing) continue;
+    const lx = toX(apt.x);
+    const ly = toY(apt.z - apt.runways[0].length / 2 - 80);
+    if (lx > -20 && lx < w + 20 && ly > -20 && ly < h + 20) {
+      ctx.fillStyle = apt.type === 'military' ? 'rgba(180, 180, 120, 0.8)' : 'rgba(200, 200, 255, 0.8)';
+      ctx.fillText(apt.icao, lx, ly);
+    }
+  }
 
   // CITY label
   ctx.fillStyle = 'rgba(200, 180, 140, 0.8)';
@@ -1048,7 +1394,7 @@ function openFullscreenMap() {
       const rect = fullmapCanvas.getBoundingClientRect();
       const cx = e.clientX - rect.left;
       const cy = e.clientY - rect.top;
-      const fullViewRange = 28000;
+      const fullViewRange = 42000;
       const worldX = (cx / rect.width - 0.5) * fullViewRange;
       const worldZ = (cy / rect.height - 0.5) * fullViewRange;
       const hitRadius = fullViewRange / rect.width * 20;
@@ -1074,16 +1420,14 @@ function updateFullscreenMap() {
   const dpr = window.devicePixelRatio || 1;
   const w = fullmapCanvas.width / dpr;
   const h = fullmapCanvas.height / dpr;
-  const fullViewRange = 28000;
+  const fullViewRange = 42000;
   const scale = w / fullViewRange;
 
   // Background terrain
   if (terrainImage) {
-    const terrainPx = (20000 / fullViewRange) * w;
-    const offset = (w - terrainPx) / 2;
     ctx.fillStyle = '#0a1020';
     ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(terrainImage, offset, offset, terrainPx, terrainPx);
+    ctx.drawImage(terrainImage, 0, 0, w, h);
     ctx.fillStyle = 'rgba(0, 8, 20, 0.25)';
     ctx.fillRect(0, 0, w, h);
   } else {
@@ -1110,7 +1454,7 @@ function updateFullscreenMap() {
   // Grid
   ctx.strokeStyle = 'rgba(120, 180, 255, 0.06)';
   ctx.lineWidth = 0.5;
-  for (let g = -14000; g <= 14000; g += 2000) {
+  for (let g = -20000; g <= 20000; g += 2000) {
     const sx = toX(g);
     ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke();
     const sy = toY(g);
@@ -1126,6 +1470,28 @@ function updateFullscreenMap() {
   const irw = INTL_RUNWAY_WIDTH * scale;
   const irl = INTL_RUNWAY_LENGTH * scale;
   ctx.fillRect(toX(INTL_AIRPORT_X) - irw/2, toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2), irw, irl);
+
+  // Data-driven new airports
+  for (const apt of AIRPORTS) {
+    if (apt._existing) continue;
+    const rwy = apt.runways[0];
+    const rLen = Math.max(6, rwy.length * scale);
+    const rWid = Math.max(4, rwy.width * scale);
+    const headingRad = ((rwy.heading - 90) * Math.PI) / 180;
+    const cx = toX(apt.x);
+    const cy = toY(apt.z);
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(headingRad);
+    ctx.fillStyle = apt.type === 'military' ? 'rgba(160, 160, 80, 0.9)' : 'rgba(150, 150, 150, 0.9)';
+    ctx.fillRect(-rWid / 2, -rLen / 2, rWid, rLen);
+    ctx.restore();
+    // Marker dot
+    ctx.fillStyle = apt.type === 'military' ? '#aaaa44' : '#cccccc';
+    ctx.beginPath();
+    ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // City zones
   ctx.fillStyle = 'rgba(60, 60, 80, 0.4)';
@@ -1211,6 +1577,12 @@ function updateFullscreenMap() {
   ctx.fillText('APT1', toX(0), toY(-RUNWAY_LENGTH/2 - 120));
   ctx.fillText('APT2', toX(AIRPORT2_X), toY(AIRPORT2_Z - RUNWAY_LENGTH/2 - 120));
   ctx.fillText('INTL', toX(INTL_AIRPORT_X), toY(INTL_AIRPORT_Z - INTL_RUNWAY_LENGTH/2 - 120));
+  // New airport labels
+  for (const apt of AIRPORTS) {
+    if (apt._existing) continue;
+    ctx.fillStyle = apt.type === 'military' ? 'rgba(180, 180, 120, 0.9)' : 'rgba(200, 200, 255, 0.9)';
+    ctx.fillText(apt.icao, toX(apt.x), toY(apt.z - apt.runways[0].length / 2 - 120));
+  }
   ctx.fillStyle = 'rgba(200, 180, 140, 0.9)';
   ctx.fillText('CITY', toX(CITY_CENTER_X), toY(CITY_CENTER_Z - cityHalf - 60));
   ctx.fillText('BAYVIEW', toX(CT_CENTER_X), toY(CT_CENTER_Z - CT_SIZE_Z/2 - 60));
@@ -1240,6 +1612,13 @@ function updateFullscreenMap() {
 
 export function showMessage(msg) {
   if (els.message) els.message.textContent = msg;
+}
+
+let _timedMsgTimer = 0;
+export function showTimedHudMessage(msg, ms) {
+  showMessage(msg);
+  if (_timedMsgTimer) clearTimeout(_timedMsgTimer);
+  _timedMsgTimer = setTimeout(() => { showMessage(''); _timedMsgTimer = 0; }, ms);
 }
 
 export function clearMessage() {

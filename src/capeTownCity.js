@@ -10,6 +10,7 @@ let streetGlowMesh = null;
 let buildingWindowMesh = null;
 let obstructionLightMesh = null;
 let stadiumFloodMesh = null;
+let ctGlowPoints = null;
 
 // Seeded PRNG
 let _seed = 77777;
@@ -1295,6 +1296,36 @@ function buildStreetLights(scene) {
 
   streetBulbMesh = bulbMesh;
   streetGlowMesh = glowMesh;
+
+  // Aerial glow points — visible from altitude
+  const glowPointsGeo = new THREE.BufferGeometry();
+  const glowPositions = new Float32Array(lights.length * 3);
+  for (let i = 0; i < lights.length; i++) {
+    glowPositions[i * 3] = lights[i].x;
+    glowPositions[i * 3 + 1] = poleH + 0.5;
+    glowPositions[i * 3 + 2] = lights[i].z;
+  }
+  glowPointsGeo.setAttribute('position', new THREE.BufferAttribute(glowPositions, 3));
+  const gc = document.createElement('canvas');
+  gc.width = 32; gc.height = 32;
+  const gctx = gc.getContext('2d');
+  const gg = gctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  gg.addColorStop(0, 'rgba(255, 220, 150, 1.0)');
+  gg.addColorStop(0.3, 'rgba(255, 200, 100, 0.6)');
+  gg.addColorStop(0.7, 'rgba(255, 180, 80, 0.15)');
+  gg.addColorStop(1, 'rgba(255, 160, 60, 0.0)');
+  gctx.fillStyle = gg;
+  gctx.fillRect(0, 0, 32, 32);
+  const gt = new THREE.CanvasTexture(gc);
+  const gmat = new THREE.PointsMaterial({
+    map: gt, size: 30, transparent: true, opacity: 0.7,
+    depthWrite: false, sizeAttenuation: true,
+    blending: THREE.AdditiveBlending, color: 0xffcc77,
+  });
+  ctGlowPoints = new THREE.Points(glowPointsGeo, gmat);
+  ctGlowPoints.visible = false;
+  ctGlowPoints.frustumCulled = false;
+  scene.add(ctGlowPoints);
 }
 
 // ── Ground plane ──────────────────────────────────────────────────────
@@ -1369,18 +1400,22 @@ export function createCapeTownCity(scene) {
 
 export function updateCapeTownNight(isNight) {
   if (streetBulbMesh) {
-    streetBulbMesh.material.emissiveIntensity = isNight ? 2.5 : 0.3;
+    streetBulbMesh.material.emissiveIntensity = isNight ? 8.0 : 0.3;
   }
   if (streetGlowMesh) {
     streetGlowMesh.visible = isNight;
+    if (isNight && streetGlowMesh.material) streetGlowMesh.material.opacity = 0.35;
   }
   if (buildingWindowMesh) {
     buildingWindowMesh.visible = isNight;
   }
   if (obstructionLightMesh) {
-    obstructionLightMesh.material.emissiveIntensity = isNight ? 3.0 : 0.2;
+    obstructionLightMesh.material.emissiveIntensity = isNight ? 6.0 : 0.2;
   }
   if (stadiumFloodMesh) {
-    stadiumFloodMesh.material.emissiveIntensity = isNight ? 3.0 : 0.5;
+    stadiumFloodMesh.material.emissiveIntensity = isNight ? 8.0 : 0.5;
+  }
+  if (ctGlowPoints) {
+    ctGlowPoints.visible = isNight;
   }
 }

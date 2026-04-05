@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { Lensflare, LensflareElement } from 'three/addons/objects/Lensflare.js';
 import { DEFAULT_TIME_OF_DAY, TIME_CYCLE_RATE, TERRAIN_SIZE, CAMERA_FAR } from './constants.js';
-import { clamp, lerp } from './utils.js';
+import { clamp, lerp, getSunElevation } from './utils.js';
 
 export let scene, renderer;
 let _resizeCb = null;
@@ -14,6 +14,8 @@ let lensflare;
 const sunPosition = new THREE.Vector3();
 const sunDirection = new THREE.Vector3();
 const _fogColor = new THREE.Color();
+const _horizonColor = new THREE.Color();
+const _zenithColor = new THREE.Color();
 
 // Environment map for PBR reflections
 let envMapRT = null;
@@ -64,15 +66,15 @@ export function initScene(container) {
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 0.75;
-  renderer.setClearColor(0x4a90d9);
+  renderer.toneMappingExposure = 0.82;
+  renderer.setClearColor(0x6da2dc);
   container.appendChild(renderer.domElement);
 
   // Atmospheric fog for depth and haze
-  scene.fog = new THREE.FogExp2(0x8cb4de, 0.00004);
+  scene.fog = new THREE.FogExp2(0x8cb4de, 0.000028);
 
   // Ambient light (warm fill — boosted to compensate for lower exposure)
-  ambientLight = new THREE.AmbientLight(0xd0d0d0, 1.0);
+  ambientLight = new THREE.AmbientLight(0xd0d0d0, 0.9);
   scene.add(ambientLight);
 
   // Sun (directional)
@@ -92,7 +94,7 @@ export function initScene(container) {
   scene.add(sun.target);
 
   // Hemisphere light for sky/ground bounce
-  hemiLight = new THREE.HemisphereLight(0xc0d8f0, 0x3d6b2e, 0.8);
+  hemiLight = new THREE.HemisphereLight(0xc0d8f0, 0x3d6b2e, 0.82);
   scene.add(hemiLight);
 
   // Sky addon with atmospheric scattering
@@ -119,10 +121,10 @@ export function initScene(container) {
 
 // Sky color palettes for time-of-day
 const SKY_PALETTES = {
-  dawn:  { horizon: [0.9, 0.6, 0.4],   zenith: [0.3, 0.35, 0.6],  sun: [1, 0.7, 0.4] },
-  day:   { horizon: [0.75, 0.82, 0.92], zenith: [0.3, 0.5, 0.85],  sun: [1, 0.95, 0.8] },
-  dusk:  { horizon: [0.9, 0.5, 0.3],    zenith: [0.2, 0.2, 0.5],   sun: [1, 0.6, 0.3] },
-  night: { horizon: [0.05, 0.05, 0.1],  zenith: [0.02, 0.02, 0.08], sun: [0.1, 0.1, 0.2] },
+  dawn:  { horizon: [1.0, 0.66, 0.4],   zenith: [0.34, 0.42, 0.7],   sun: [1.0, 0.8, 0.55] },
+  day:   { horizon: [0.62, 0.77, 0.96], zenith: [0.16, 0.43, 0.9],   sun: [1.0, 0.98, 0.92] },
+  dusk:  { horizon: [1.0, 0.48, 0.27],  zenith: [0.2, 0.18, 0.45],   sun: [1.0, 0.56, 0.25] },
+  night: { horizon: [0.08, 0.09, 0.18], zenith: [0.03, 0.04, 0.12],  sun: [0.12, 0.14, 0.25] },
 };
 
 function lerpPalette(a, b, t) {
@@ -177,6 +179,11 @@ function createSky() {
         float sunDot = max(dot(normalize(vWorldDir), sunDirection), 0.0);
         sky += sunColor * pow(sunDot, 256.0) * 2.0; // sun disc
         sky += sunColor * pow(sunDot, 8.0) * 0.3;   // sun glow
+        // Mie scattering halo — warm orange at low sun, fading to sun color as it rises
+        float mie = pow(sunDot, 3.0) * 0.25;
+        float sunHeight = max(sunDirection.y, 0.0);
+        vec3 mieColor = mix(vec3(1.0, 0.5, 0.2), sunColor, sunHeight);
+        sky += mieColor * mie;
         gl_FragColor = vec4(sky, 1.0);
       }
     `,
@@ -197,9 +204,7 @@ export function generateEnvironmentMap() {
   if (!renderer || !sky) return;
 
   // Throttle: skip if sun elevation hasn't changed by more than 5 degrees
-  const currentSunElev = (timeOfDay >= 6 && timeOfDay <= 18)
-    ? 90 * Math.sin(Math.PI * (timeOfDay - 6) / 12)
-    : -10;
+  const currentSunElev = getSunElevation(timeOfDay);
   if (lastEnvMapSunElevation !== null && Math.abs(currentSunElev - lastEnvMapSunElevation) < 5) return;
   lastEnvMapSunElevation = currentSunElev;
 
@@ -291,9 +296,9 @@ function createLensflare() {
   const flareTexture2 = new THREE.CanvasTexture(canvas2);
 
   lensflare = new Lensflare();
-  lensflare.addElement(new LensflareElement(flareTexture, 400, 0, new THREE.Color(1, 0.95, 0.8)));
-  lensflare.addElement(new LensflareElement(flareTexture2, 200, 0.1));
-  lensflare.addElement(new LensflareElement(flareTexture2, 100, 0.3));
+  lensflare.addElement(new LensflareElement(flareTexture, 180, 0, new THREE.Color(1, 0.95, 0.8)));
+  lensflare.addElement(new LensflareElement(flareTexture2, 80, 0.1));
+  lensflare.addElement(new LensflareElement(flareTexture2, 40, 0.3));
 
   sun.add(lensflare);
 }
@@ -305,10 +310,10 @@ function createStarField() {
   const sizes = new Float32Array(count);
 
   for (let i = 0; i < count; i++) {
-    // Random points on a sphere
+    // Random points on a sphere — match sky dome radius
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
-    const r = 8000;
+    const r = CAMERA_FAR * 0.85;
 
     positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
     positions[i * 3 + 1] = Math.abs(r * Math.cos(phi)); // Only upper hemisphere
@@ -396,14 +401,36 @@ function updateTimeOfDayLighting() {
   const dayFactor = clamp(sunElevation / 45, 0, 1);
   const duskFactor = clamp((sunElevation + 5) / 15, 0, 1); // transition zone
 
-  // Sun intensity
-  sun.intensity = lerp(0.0, 3.5, dayFactor);
+  // Sun intensity and warmth
+  // Reduce intensity near horizon to prevent blinding sunset
+  const sunIntensityFactor = sunElevation < 10 ? clamp(sunElevation / 10, 0, 1) : 1;
+  sun.intensity = lerp(0.0, 2.5, dayFactor) * (0.3 + 0.7 * sunIntensityFactor);
+  if (sunElevation < 0) {
+    sun.color.setRGB(1.0, 0.78, 0.6);
+  } else if (sunElevation < 20) {
+    const warmT = sunElevation / 20;
+    sun.color.setRGB(
+      1.0,
+      lerp(0.72, 0.98, warmT),
+      lerp(0.56, 0.92, warmT)
+    );
+  } else {
+    sun.color.setRGB(1.0, 0.97, 0.9);
+  }
 
-  // Ambient light (boosted at night to compensate for removed PointLights)
+  // Ambient light — 3-state: night (blue), golden hour (warm), day (neutral)
   if (ambientLight) {
-    ambientLight.intensity = lerp(0.25, 1.0, duskFactor);
-    if (duskFactor < 0.3) {
-      ambientLight.color.setHex(0x112244); // blue tint at night
+    ambientLight.intensity = lerp(0.65, 0.92, duskFactor);
+    if (sunElevation < 0) {
+      ambientLight.color.setHex(0x334466); // blue moonlight tint — brighter
+    } else if (sunElevation < 15) {
+      // Golden hour: warm amber → neutral
+      const goldenT = sunElevation / 15;
+      ambientLight.color.setRGB(
+        lerp(1.0, 0.816, goldenT),
+        lerp(0.878, 0.816, goldenT),
+        lerp(0.627, 0.816, goldenT)
+      );
     } else {
       ambientLight.color.setHex(0xd0d0d0);
     }
@@ -411,7 +438,7 @@ function updateTimeOfDayLighting() {
 
   // Hemisphere light (blue sky tint at night)
   if (hemiLight) {
-    hemiLight.intensity = lerp(0.15, 0.8, duskFactor);
+    hemiLight.intensity = lerp(0.4, 0.8, duskFactor);
     if (duskFactor < 0.3) {
       hemiLight.color.setHex(0x1a2a4a); // blue tint at night
     } else {
@@ -428,14 +455,15 @@ function updateTimeOfDayLighting() {
   }
 
   // Fog color matches sky horizon for seamless blending
+  _horizonColor.setRGB(...skyPalette.horizon);
+  _zenithColor.setRGB(...skyPalette.zenith);
   if (scene.fog) {
-    _fogColor.setRGB(...skyPalette.horizon);
-    scene.fog.color.copy(_fogColor);
-    renderer.setClearColor(_fogColor);
+    scene.fog.color.copy(_horizonColor);
+    renderer.setClearColor(_horizonColor);
   }
 
-  // Tone mapping exposure
-  renderer.toneMappingExposure = lerp(0.25, 0.75, duskFactor);
+  // Tone mapping exposure — keep night bright enough to see terrain and lights
+  renderer.toneMappingExposure = lerp(0.55, 0.82, duskFactor);
 
   // Stars visibility
   if (starField) {
@@ -468,6 +496,9 @@ function updateTimeOfDayLighting() {
   }
 
 }
+
+export function getHorizonColor() { return _horizonColor; }
+export function getZenithColor() { return _zenithColor; }
 
 export function updateSunTarget(target) {
   sun.target.position.copy(target);

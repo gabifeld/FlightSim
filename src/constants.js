@@ -29,7 +29,7 @@ export const STALL_SPEED = 45; // m/s
 // Ground handling
 export const GROUND_FRICTION = 0.03;
 export const BRAKE_FRICTION = 0.4;
-export const MAX_LANDING_VS = 3.0; // m/s vertical
+export const MAX_LANDING_VS = 3.5; // m/s vertical (~690 fpm)
 export const MAX_LANDING_SPEED = 80; // m/s
 
 // Terrain

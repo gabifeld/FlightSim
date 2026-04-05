@@ -10,6 +10,14 @@ import { isLandingAssistActive, updateLandingAssist } from './landing.js';
 import { isAPEngaged, getAPState, updateAutopilot } from './autopilot.js';
 import { isEngineFailed } from './challenges.js';
 import { getSetting } from './settings.js';
+import { getTotalThrust, isAnyEngineRunning } from './systemsEngine.js';
+import { isPitotBlocked, getPitotAirspeed } from './failures.js';
+import { getRealism } from './realism.js';
+import {
+  initFlightModel, updateFlightModel, getBuffetPerturbation,
+  getSpinTorques, getEngineOutYaw, getGOnset, getFlightModelState,
+  resetFlightModel,
+} from './flightModel.js';
 import {
   GRAVITY,
   AIR_DENSITY,
@@ -77,8 +85,10 @@ function cfg(key, fallback) {
 }
 
 let smoothedAoa = 0;
+let fms = initFlightModel(); // flight model state
 
 export let preLandingVS = 0;
+export function getPhysicsFlightModel() { return fms; }
 
 export function updatePhysics(dt) {
   const state = getActiveVehicle();
@@ -146,6 +156,9 @@ export function updatePhysics(dt) {
     const assist = updateLandingAssist(dt);
     if (assist) {
       pitchInput = assist.pitchCommand;
+      if (typeof assist.rollCommand === 'number') {
+        rollInput = assist.rollCommand;
+      }
       state.throttle = assist.throttleCommand;
     }
   }
@@ -162,11 +175,28 @@ export function updatePhysics(dt) {
     }
   }
 
+  // Publish resolved control inputs (keyboard/gamepad/mobile/AP) for visuals/HUD.
+  if (!state.controlInputs) state.controlInputs = { pitch: 0, roll: 0, yaw: 0 };
+  state.controlInputs.pitch = clamp(pitchInput, -1, 1);
+  state.controlInputs.roll = clamp(rollInput, -1, 1);
+  state.controlInputs.yaw = clamp(yawInput, -1, 1);
+
   // Stall detection
   const isStalling = Math.abs(state.aoa) > stallAoa && speed > takeoffSpd * 0.4;
   const stallFactor = isStalling
     ? clamp((Math.abs(state.aoa) - stallAoa) / (stallAoa * 0.5), 0, 1)
     : 0;
+
+  // ── Advanced flight model (G-force tracking only, no stall/spin override) ──
+  // The original stall physics below handles stall behavior.
+  // Flight model only tracks G-onset for camera effects.
+  const realism = getRealism();
+  updateFlightModel(fms, {
+    aoa: state.aoa, isStalling, stallAoa, onGround: state.onGround,
+    gForce: state.gForce || 1, speed, throttle: state.throttle,
+    pitchInput, rollInput, yawInput,
+    engineFailed: [], engineArms: [], dt,
+  }, realism);
 
   // Apply rotations
   if (state.onGround) {
@@ -321,18 +351,16 @@ export function updatePhysics(dt) {
     ? _drag.copy(relativeVelocity).normalize().multiplyScalar(-dragMag)
     : _drag.set(0, 0, 0);
 
-  // Fuel consumption
-  if (!getSetting('unlimitedFuel') && state.fuel !== undefined) {
-    const fuelCapacity = cfg('fuelCapacity', 1000);
-    const fuelBurnRate = cfg('fuelBurnRate', 100);
-    // burnRate is L/hr, convert to L/s; normalize by capacity to get 0-1 consumption
-    state.fuel -= (state.throttle * fuelBurnRate * dt) / (3600 * fuelCapacity);
-    if (state.fuel < 0) state.fuel = 0;
-  }
+  // Fuel consumption is handled by fuelSystem.js in the game loop
 
-  // Thrust
+  // Thrust — use systemsEngine if engines are initialized, otherwise fall back to simple model
+  let thrustMag;
   const fuelEmpty = state.fuel !== undefined && state.fuel <= 0 && !getSetting('unlimitedFuel');
-  const thrustMag = (isEngineFailed() || fuelEmpty) ? 0 : state.throttle * maxThrust;
+  if (isAnyEngineRunning()) {
+    thrustMag = isEngineFailed() ? 0 : getTotalThrust();
+  } else {
+    thrustMag = (isEngineFailed() || fuelEmpty) ? 0 : state.throttle * maxThrust;
+  }
   const thrust = _thrust.copy(_forward).multiplyScalar(thrustMag);
 
   // Gravity
@@ -378,7 +406,10 @@ export function updatePhysics(dt) {
   state.velocity.addScaledVector(accel, dt);
   state.position.addScaledVector(state.velocity, dt);
 
-  preLandingVS = state.velocity.y;
+  // Smooth preLandingVS: only update while airborne and descending to avoid single-frame spikes
+  if (!state.onGround && state.velocity.y < 0) {
+    preLandingVS = preLandingVS * 0.8 + state.velocity.y * 0.2;
+  }
 
   // Ground collision
   const groundHeight = getGroundLevel(state.position.x, state.position.z);

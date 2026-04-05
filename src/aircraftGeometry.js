@@ -2,20 +2,6 @@ import * as THREE from 'three';
 import { getEnvironmentMap, isNight } from './scene.js';
 import { getSetting, isSettingExplicit } from './settings.js';
 
-// Toon outline for stylized aircraft look
-const _outlineMat = new THREE.MeshBasicMaterial({
-  color: 0x222222,
-  side: THREE.BackSide,
-});
-
-function addOutline(mesh, thickness = 0.04) {
-  if (!mesh.geometry) return;
-  const outline = new THREE.Mesh(mesh.geometry, _outlineMat);
-  outline.scale.multiplyScalar(1 + thickness);
-  outline.raycast = () => {}; // not pickable
-  mesh.add(outline);
-}
-
 // Module-level state (set during build, returned as struct)
 let aircraftGroup;
 let propeller;
@@ -33,6 +19,9 @@ let tailLogoLight = null;
 let landingSpotLight = null;
 let landingLightCone = null;
 let cockpitCanvas, cockpitCtx, cockpitTexture, cockpitPanel;
+let afterburnerInner = null;
+let afterburnerOuter = null;
+let mainWing = null;
 
 
 function createFuselageGeo(length, radius, noseLen, tailLen, segments) {
@@ -209,6 +198,87 @@ function createSeatFabricTexture(isHighDetail) {
   return tex;
 }
 
+function createAvionicsPanelTexture(isHighDetail, style = 'jet') {
+  const size = isHighDetail ? 1024 : 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  // Base instrument panel paint
+  ctx.fillStyle = '#1b1f27';
+  ctx.fillRect(0, 0, size, size);
+
+  // Fine grain / wear
+  for (let i = 0; i < size * 5; i++) {
+    const v = 28 + Math.floor(Math.random() * 18);
+    ctx.fillStyle = `rgba(${v},${v},${v + 6},0.14)`;
+    ctx.fillRect(Math.random() * size, Math.random() * size, 1, 1);
+  }
+
+  // Panel seams + fasteners
+  ctx.strokeStyle = 'rgba(120,130,145,0.28)';
+  ctx.lineWidth = Math.max(1, size * 0.0017);
+  const cols = style === 'jet' ? 6 : 4;
+  const rows = style === 'jet' ? 7 : 5;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const w = size * (0.11 + Math.random() * 0.09);
+      const h = size * (0.08 + Math.random() * 0.08);
+      const x = size * (0.04 + c * (0.92 / cols)) + Math.random() * size * 0.02;
+      const y = size * (0.04 + r * (0.9 / rows)) + Math.random() * size * 0.02;
+      ctx.strokeRect(x, y, w, h);
+      ctx.fillStyle = 'rgba(210,220,230,0.35)';
+      ctx.fillRect(x + 2, y + 2, 2, 2);
+      ctx.fillRect(x + w - 4, y + 2, 2, 2);
+      ctx.fillRect(x + 2, y + h - 4, 2, 2);
+      ctx.fillRect(x + w - 4, y + h - 4, 2, 2);
+    }
+  }
+
+  // Knobs / buttons
+  const knobRows = style === 'jet' ? 9 : 6;
+  const knobCols = style === 'jet' ? 16 : 10;
+  for (let r = 0; r < knobRows; r++) {
+    for (let c = 0; c < knobCols; c++) {
+      const x = size * (0.05 + c * (0.9 / (knobCols - 1)));
+      const y = size * (0.07 + r * (0.86 / (knobRows - 1)));
+      const rad = size * (style === 'jet' ? 0.0065 : 0.008);
+      ctx.beginPath();
+      ctx.arc(x, y, rad, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(80,88,99,0.85)';
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(x - rad * 0.25, y - rad * 0.25, rad * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(190,200,210,0.55)';
+      ctx.fill();
+    }
+  }
+
+  // Avionics label glow accents
+  if (style === 'fighter') {
+    ctx.fillStyle = 'rgba(66,255,145,0.28)';
+  } else if (style === 'prop') {
+    ctx.fillStyle = 'rgba(120,180,255,0.18)';
+  } else {
+    ctx.fillStyle = 'rgba(255,194,88,0.2)';
+  }
+  for (let i = 0; i < 70; i++) {
+    ctx.fillRect(
+      size * (0.04 + Math.random() * 0.9),
+      size * (0.04 + Math.random() * 0.9),
+      size * (0.01 + Math.random() * 0.02),
+      size * 0.004
+    );
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(1, 1);
+  return tex;
+}
+
 function createNacelle(scene, group, x, y, z, radius, length, mat, chromeMat, detailLevel = 'medium') {
   // Nacelle body
   const nacPts = [];
@@ -288,6 +358,58 @@ function createNacelle(scene, group, x, y, z, radius, length, mat, chromeMat, de
 
 // ─── Main model builder ───
 
+function createPanelLineTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#cccccc';
+  ctx.fillRect(0, 0, 512, 256);
+  ctx.strokeStyle = 'rgba(80,80,80,0.3)';
+  ctx.lineWidth = 1;
+  for (let y = 0; y < 256; y += 32) {
+    ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(512, y); ctx.stroke();
+  }
+  for (let x = 0; x < 512; x += 48) {
+    ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, 256); ctx.stroke();
+  }
+  // Darker patches near bottom (gear wells)
+  ctx.fillStyle = 'rgba(60,60,60,0.12)';
+  ctx.fillRect(120, 200, 100, 56);
+  ctx.fillRect(292, 200, 100, 56);
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 2);
+  return tex;
+}
+
+function createPropDiscTexture() {
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, size, size);
+  const cx = size / 2, cy = size / 2;
+  // Draw radial motion blur arcs
+  for (let i = 0; i < 6; i++) {
+    const angle = (i / 6) * Math.PI * 2;
+    const grad = ctx.createRadialGradient(cx, cy, size * 0.1, cx, cy, size * 0.48);
+    grad.addColorStop(0, 'rgba(100,100,100,0)');
+    grad.addColorStop(0.3, 'rgba(80,80,80,0.12)');
+    grad.addColorStop(0.7, 'rgba(60,60,60,0.08)');
+    grad.addColorStop(1, 'rgba(80,80,80,0)');
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, size * 0.48, angle, angle + Math.PI * 0.28);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  return tex;
+}
+
 function getAircraftDetailConfig() {
   const assetQuality = isSettingExplicit('assetQuality') ? getSetting('assetQuality') : getSetting('graphicsQuality');
   const isLowDetail = assetQuality === 'low';
@@ -309,35 +431,70 @@ function resolveAircraftVariant(type) {
   if (type.name === 'Boeing 737') return 'boeing_737';
   if (type.name === 'Airbus A340' || type.name === 'Airbus A320') return 'airbus_a320';
   if (type.name === 'F-16 Falcon') return 'f16';
+  if (type.name && type.name.includes('Extra 300')) return 'extra_300';
 
   if (type.type === 'fighter') return 'f16';
   if (type.type === 'prop') return 'cessna_172';
   return 'boeing_737';
 }
 
+/** Create a procedural canvas livery texture for the Extra 300 fuselage */
+function createExtra300FuselageTex() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+
+  // Base: bright red
+  ctx.fillStyle = '#cc2200';
+  ctx.fillRect(0, 0, 256, 64);
+
+  // Blue nose section (first 1/6)
+  ctx.fillStyle = '#2244cc';
+  ctx.fillRect(0, 0, 43, 64);
+
+  // White horizontal stripe across the middle third
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 21, 256, 22);
+
+  // Thin accent lines at stripe edges
+  ctx.fillStyle = '#1a1a44';
+  ctx.fillRect(0, 20, 256, 1);
+  ctx.fillRect(0, 43, 256, 1);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
 function createAircraftMaterialSet(type, detail, variant) {
   const isLowDetail = detail.isLowDetail;
   const isHighDetail = detail.isHighDetail;
 
+  const isExtra300 = variant === 'extra_300';
   const fighterPrimary = 0x6e747b;
   const fighterAccent = 0x4e545a;
   const baseColor = variant === 'f16' ? fighterPrimary : type.color;
-  const accentColor = variant === 'f16' ? fighterAccent : type.accentColor;
+  const accentColor = variant === 'f16' ? fighterAccent : (isExtra300 ? 0x2244cc : type.accentColor);
 
   const bodyMat = isHighDetail
     ? new THREE.MeshPhysicalMaterial({
       color: baseColor,
-      roughness: variant === 'f16' ? 0.42 : 0.15,
-      metalness: variant === 'f16' ? 0.08 : 0.28,
-      clearcoat: variant === 'f16' ? 0.35 : 1.0,
-      clearcoatRoughness: variant === 'f16' ? 0.35 : 0.1,
-      envMapIntensity: variant === 'f16' ? 1.2 : 2.0,
+      roughness: variant === 'f16' ? 0.38 : 0.12,
+      metalness: variant === 'f16' ? 0.1 : 0.32,
+      clearcoat: variant === 'f16' ? 0.5 : 1.0,
+      clearcoatRoughness: variant === 'f16' ? 0.25 : 0.05,
+      envMapIntensity: variant === 'f16' ? 1.8 : 2.5,
+      sheen: variant === 'f16' ? 0.0 : 0.15,
+      sheenRoughness: 0.3,
+      sheenColor: new THREE.Color(0xccddff),
     })
     : new THREE.MeshStandardMaterial({
       color: baseColor,
-      roughness: isLowDetail ? 0.46 : 0.25,
-      metalness: variant === 'f16' ? 0.05 : 0.18,
-      envMapIntensity: 1.5,
+      roughness: isLowDetail ? 0.46 : 0.22,
+      metalness: variant === 'f16' ? 0.08 : 0.22,
+      envMapIntensity: 1.8,
     });
 
   const accentMat = new THREE.MeshStandardMaterial({
@@ -348,9 +505,10 @@ function createAircraftMaterialSet(type, detail, variant) {
   });
 
   const bareMetalMat = new THREE.MeshStandardMaterial({
-    color: 0xc1c7cf,
-    roughness: isLowDetail ? 0.25 : 0.16,
-    metalness: 0.82,
+    color: 0xc8cdd4,
+    roughness: isLowDetail ? 0.22 : 0.12,
+    metalness: 0.9,
+    envMapIntensity: 2.0,
   });
 
   const darkMat = new THREE.MeshStandardMaterial({
@@ -366,17 +524,19 @@ function createAircraftMaterialSet(type, detail, variant) {
   });
 
   const glassMat = new THREE.MeshPhysicalMaterial({
-    color: variant === 'f16' ? 0x8ec4ae : 0x98c2d8,
-    roughness: variant === 'f16' ? 0.06 : 0.1,
-    metalness: 0.02,
-    transmission: isLowDetail ? 0.12 : (variant === 'f16' ? 0.28 : 0.22),
-    thickness: variant === 'f16' ? 0.06 : 0.03,
-    ior: 1.48,
+    color: variant === 'f16' ? 0x7dbfa5 : 0x88b8d0,
+    roughness: variant === 'f16' ? 0.03 : 0.05,
+    metalness: 0.05,
+    transmission: isLowDetail ? 0.12 : (variant === 'f16' ? 0.35 : 0.3),
+    thickness: variant === 'f16' ? 0.08 : 0.04,
+    ior: 1.52,
     clearcoat: 1.0,
-    clearcoatRoughness: 0.07,
+    clearcoatRoughness: 0.03,
+    reflectivity: 0.9,
     transparent: true,
-    opacity: variant === 'f16' ? 0.26 : 0.34,
+    opacity: variant === 'f16' ? 0.22 : 0.28,
     side: THREE.DoubleSide,
+    envMapIntensity: 2.5,
   });
 
   const panelLineMat = new THREE.MeshStandardMaterial({
@@ -398,6 +558,29 @@ function createAircraftMaterialSet(type, detail, variant) {
     accentMat.envMap = envMap;
     bareMetalMat.envMap = envMap;
     controlSurfaceMat.envMap = envMap;
+  }
+
+  // Extra 300 livery: procedural red/white/blue racing paint
+  if (isExtra300) {
+    const liveryTex = createExtra300FuselageTex();
+    aircraftDisposableTextures.push(liveryTex);
+    bodyMat.map = liveryTex;
+    bodyMat.color.set(0xffffff); // let texture colors come through
+    bodyMat.needsUpdate = true;
+
+    // Red wings
+    controlSurfaceMat.color.set(0xcc2200);
+    controlSurfaceMat.needsUpdate = true;
+
+    // Blue vertical stabilizer via accent
+    accentMat.color.set(0x2244cc);
+    accentMat.needsUpdate = true;
+
+    // Yellow spinner
+    bareMetalMat.color.set(0xffcc00);
+    bareMetalMat.metalness = 0.3;
+    bareMetalMat.roughness = 0.25;
+    bareMetalMat.needsUpdate = true;
   }
 
   return {
@@ -587,6 +770,15 @@ function buildCessnaExterior(type, detail, mats) {
   const wing = markShadow(new THREE.Mesh(wingGeo, mats.bodyMat));
   wing.position.set(0, wingY, wingZ);
   aircraftGroup.add(wing);
+  // 4D: Wing flex tagging
+  wing.userData.hasWingFlex = true;
+  wing.userData.wingSpan = wSpan;
+  wing.userData.flexFactor = 0.008;
+  const wPos = wing.geometry.attributes.position;
+  const origY = new Float32Array(wPos.count);
+  for (let i = 0; i < wPos.count; i++) origY[i] = wPos.getY(i);
+  wing.userData.originalY = origY;
+  mainWing = wing;
 
   const strutLen = fRad * 2.05;
   for (const side of [-1, 1]) {
@@ -669,6 +861,7 @@ function buildCessnaExterior(type, detail, mats) {
     panel.position.set(side * fRad * 0.38, fRad * 0.72, -fLen * 0.26);
     panel.rotation.set(-0.48, side * 0.28, 0);
     aircraftGroup.add(panel);
+    exteriorBodyParts.push(panel);
   }
 
   // Thin center windshield post only (no top/bottom bars that block cockpit view)
@@ -689,12 +882,14 @@ function buildCessnaExterior(type, detail, mats) {
     sideWin.position.set(side * (fRad * 0.78), fRad * 0.56, -fLen * 0.18);
     sideWin.rotation.y = side * Math.PI * 0.5;
     aircraftGroup.add(sideWin);
+    exteriorBodyParts.push(sideWin);
 
     // Rear quarter window
     const rearWin = new THREE.Mesh(new THREE.PlaneGeometry(fLen * 0.16, fRad * 0.56), cessnaGlass);
     rearWin.position.set(side * (fRad * 0.78), fRad * 0.48, -fLen * 0.02);
     rearWin.rotation.y = side * Math.PI * 0.5;
     aircraftGroup.add(rearWin);
+    exteriorBodyParts.push(rearWin);
   }
 
   // Rear window
@@ -704,6 +899,7 @@ function buildCessnaExterior(type, detail, mats) {
     rearPanel.position.set(0, fRad * 0.52, fLen * 0.06);
     rearPanel.rotation.x = 0.3;
     aircraftGroup.add(rearPanel);
+    exteriorBodyParts.push(rearPanel);
   }
 
   // Cheatline stripe (wider, more visible livery band)
@@ -760,16 +956,21 @@ function buildCessnaExterior(type, detail, mats) {
     const blade = markShadow(new THREE.Mesh(bladeGeo, mats.darkMat));
     blade.position.z = -0.02;
     blade.rotation.z = (i / bladeCount) * Math.PI * 2;
+    blade.userData.isPropBlade = true;
     propeller.add(blade);
   }
 
-  // Prop disc (translucent spinning arc, visible when engine running)
+  // 4C: Prop disc with procedural motion blur texture
   const discGeo = new THREE.RingGeometry(fRad * 0.28, propRadius, 32, 1);
+  const propDiscTex = createPropDiscTexture();
+  aircraftDisposableTextures.push(propDiscTex);
   const discMat = new THREE.MeshBasicMaterial({
+    map: propDiscTex,
     color: 0x888888, transparent: true, opacity: 0.06,
     side: THREE.DoubleSide, depthWrite: false,
   });
   const disc = new THREE.Mesh(discGeo, discMat);
+  disc.userData.isPropDisc = true;
   disc.position.z = -0.02;
   propeller.add(disc);
 
@@ -964,11 +1165,13 @@ function buildJetExterior(type, detail, mats, variant, scene) {
   const wingZ = -fLen * 0.03;
   const rootChord = fLen * (isA320 ? 0.285 : 0.275);
   const tipChord = rootChord * (isA320 ? 0.3 : 0.32);
+  const tipSweepZ = rootChord * (isA320 ? 0.68 : 0.74);
+  const wingtipClusterZ = wingZ + tipSweepZ + tipChord * 0.08;
   const wingGeo = createTaperedWing(
     wSpan,
     rootChord,
     tipChord,
-    rootChord * (isA320 ? 0.68 : 0.74),
+    tipSweepZ,
     0.17,
     0.07,
     0.095
@@ -976,6 +1179,15 @@ function buildJetExterior(type, detail, mats, variant, scene) {
   const wing = markShadow(new THREE.Mesh(wingGeo, mats.bodyMat));
   wing.position.set(0, wingY, wingZ);
   aircraftGroup.add(wing);
+  // 4D: Wing flex tagging
+  wing.userData.hasWingFlex = true;
+  wing.userData.wingSpan = wSpan;
+  wing.userData.flexFactor = isA320 ? 0.008 : 0.007;
+  const jWPos = wing.geometry.attributes.position;
+  const jOrigY = new Float32Array(jWPos.count);
+  for (let i = 0; i < jWPos.count; i++) jOrigY[i] = jWPos.getY(i);
+  wing.userData.originalY = jOrigY;
+  mainWing = wing;
 
   // Center belly fairing (wing-to-body fairing, large bulge visible from side)
   {
@@ -1020,20 +1232,20 @@ function buildJetExterior(type, detail, mats, variant, scene) {
     }
   }
 
-  const wingletHeight = isA320 ? rootChord * 0.95 : rootChord * 0.58;
+  const wingletHeight = isA320 ? rootChord * 0.18 : rootChord * 0.12;
   for (const side of [-1, 1]) {
-    const wingletGeo = new THREE.BoxGeometry(0.09, wingletHeight, rootChord * 0.28, 1, 3, 2);
+    const wingletGeo = new THREE.BoxGeometry(0.06, wingletHeight, rootChord * 0.18, 1, 3, 2);
     const wlPos = wingletGeo.attributes.position;
     for (let i = 0; i < wlPos.count; i++) {
       if (wlPos.getY(i) > 0) {
-        wlPos.setX(i, wlPos.getX(i) + side * wingletHeight * 0.14);
-        wlPos.setZ(i, wlPos.getZ(i) - wingletHeight * 0.1);
+        wlPos.setX(i, wlPos.getX(i) + side * wingletHeight * 0.08);
+        wlPos.setZ(i, wlPos.getZ(i) - wingletHeight * 0.05);
       }
     }
     wingletGeo.computeVertexNormals();
     const winglet = markShadow(new THREE.Mesh(wingletGeo, mats.accentMat));
     const tipY = wingY + Math.tan(0.095) * (wSpan * 0.5);
-    winglet.position.set(side * (wSpan * 0.5 + 0.02), tipY + wingletHeight * 0.45, wingZ + rootChord * 0.57);
+    winglet.position.set(side * (wSpan * 0.5 + 0.02), tipY + wingletHeight * 0.46, wingtipClusterZ);
     aircraftGroup.add(winglet);
   }
 
@@ -1100,6 +1312,7 @@ function buildJetExterior(type, detail, mats, variant, scene) {
     fp.position.set(side * fRad * 0.22, windshieldY + 0.12, windshieldBaseZ - 0.06);
     fp.rotation.set(-0.65, side * 0.16, 0);
     aircraftGroup.add(fp);
+    exteriorBodyParts.push(fp);
 
     // Side panels (angled outward, larger)
     const spGeo = new THREE.PlaneGeometry(fRad * 0.34, fRad * 0.36, 4, 4);
@@ -1110,6 +1323,7 @@ function buildJetExterior(type, detail, mats, variant, scene) {
     sp.position.set(side * fRad * 0.52, windshieldY + 0.08, windshieldBaseZ + 0.02);
     sp.rotation.set(-0.48, side * 0.6, 0);
     aircraftGroup.add(sp);
+    exteriorBodyParts.push(sp);
 
     // Quarter/eyebrow panels (larger)
     const qpGeo = new THREE.PlaneGeometry(fRad * 0.26, fRad * 0.2, 2, 2);
@@ -1117,6 +1331,7 @@ function buildJetExterior(type, detail, mats, variant, scene) {
     qp.position.set(side * fRad * 0.62, windshieldY + 0.18, windshieldBaseZ + 0.08);
     qp.rotation.set(-0.32, side * 0.78, 0);
     aircraftGroup.add(qp);
+    exteriorBodyParts.push(qp);
   }
 
   // Windshield frame dividers (thicker, more visible)
@@ -1287,10 +1502,10 @@ function buildJetExterior(type, detail, mats, variant, scene) {
     mainGearZ: wingZ + rootChord * 0.2,
     noseGearZ: -fLen * 0.35,
     landingLightPos: new THREE.Vector3(0, -fRad * 0.3, -fLen * 0.43),
-    navLeftPos: new THREE.Vector3(-wSpan * 0.5, wingY + 0.03, wingZ + rootChord * 0.03),
-    navRightPos: new THREE.Vector3(wSpan * 0.5, wingY + 0.03, wingZ + rootChord * 0.03),
-    strobeLeftPos: new THREE.Vector3(-wSpan * 0.5, wingY + 0.04, wingZ + rootChord * 0.46),
-    strobeRightPos: new THREE.Vector3(wSpan * 0.5, wingY + 0.04, wingZ + rootChord * 0.46),
+    navLeftPos: new THREE.Vector3(-(wSpan * 0.5 + 0.02), wingY + 0.03, wingtipClusterZ),
+    navRightPos: new THREE.Vector3(wSpan * 0.5 + 0.02, wingY + 0.03, wingtipClusterZ),
+    strobeLeftPos: new THREE.Vector3(-(wSpan * 0.5 + 0.02), wingY + 0.04, wingtipClusterZ),
+    strobeRightPos: new THREE.Vector3(wSpan * 0.5 + 0.02, wingY + 0.04, wingtipClusterZ),
     beaconPos: new THREE.Vector3(0, fRad * 0.33 + type.tailHeight * 1.05, tailZ - fLen * 0.03),
     tailLogoPos: new THREE.Vector3(0, fRad * 0.2 + type.tailHeight * 0.55, tailZ + 0.45),
   };
@@ -1335,6 +1550,15 @@ function buildF16Exterior(type, detail, mats) {
   const wing = markShadow(new THREE.Mesh(wingGeo, mats.bodyMat));
   wing.position.set(0, wingY, wingZ);
   aircraftGroup.add(wing);
+  // 4D: Wing flex tagging
+  wing.userData.hasWingFlex = true;
+  wing.userData.wingSpan = wSpan;
+  wing.userData.flexFactor = 0.005;
+  const fWPos = wing.geometry.attributes.position;
+  const fOrigY = new Float32Array(fWPos.count);
+  for (let i = 0; i < fWPos.count; i++) fOrigY[i] = fWPos.getY(i);
+  wing.userData.originalY = fOrigY;
+  mainWing = wing;
 
   for (const side of [-1, 1]) {
     const lerxShape = new THREE.Shape();
@@ -1464,19 +1688,81 @@ function buildF16Exterior(type, detail, mats) {
   nozzleOuter.position.z = fLen * 0.5;
   aircraftGroup.add(nozzleOuter);
 
-  const afterburner = new THREE.Mesh(
-    new THREE.CircleGeometry(fRad * 0.34, detail.roundSegments),
-    new THREE.MeshStandardMaterial({
-      color: 0xff7b33,
-      emissive: 0xff6618,
-      emissiveIntensity: 0.72,
-      transparent: true,
-      opacity: 0.52,
-      side: THREE.DoubleSide,
-    })
-  );
-  afterburner.position.set(0, 0, fLen * 0.58);
-  aircraftGroup.add(afterburner);
+  // 4A: Lightweight afterburner — low-poly cones with simple shader (no noise loops)
+  const abInnerGeo = new THREE.ConeGeometry(fRad * 0.35, fRad * 2.0, 8, 1);
+  abInnerGeo.rotateX(-Math.PI / 2);
+  const abInnerMat = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uTime: { value: 0 },
+      uIntensity: { value: 0 },
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      varying float vDist;
+      void main() {
+        vUv = uv;
+        vDist = length(position.xy) / ${(fRad * 0.35).toFixed(4)};
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uIntensity;
+      varying vec2 vUv;
+      varying float vDist;
+
+      void main() {
+        float axial = vUv.y;
+        float radial = clamp(vDist, 0.0, 1.0);
+
+        // Simple flame shape — no noise texture lookups
+        float flame = (1.0 - axial) * (1.0 - radial * 0.7);
+        flame = pow(flame, 0.6);
+
+        // Fast flicker from sin instead of noise
+        float flicker = 0.88 + 0.12 * sin(uTime * 37.0 + axial * 10.0) * sin(uTime * 53.0);
+        flame *= flicker;
+
+        // Color: white core → blue → orange tip
+        vec3 col = mix(vec3(1.0, 0.95, 0.85), vec3(0.4, 0.6, 1.0), smoothstep(0.0, 0.4, radial));
+        col = mix(col, vec3(1.0, 0.5, 0.1), smoothstep(0.3, 0.9, axial));
+
+        float alpha = flame * uIntensity * 0.85 * smoothstep(1.0, 0.6, radial);
+        gl_FragColor = vec4(col * (1.0 + flame * 0.3), clamp(alpha, 0.0, 1.0));
+      }
+    `,
+  });
+  afterburnerInner = new THREE.Mesh(abInnerGeo, abInnerMat);
+  afterburnerInner.position.set(0, 0, fLen * 0.56);
+  afterburnerInner.visible = false;
+  aircraftGroup.add(afterburnerInner);
+
+  // Outer glow — even simpler, 6-sided cone
+  const abOuterGeo = new THREE.ConeGeometry(fRad * 0.6, fRad * 3.5, 6, 1);
+  abOuterGeo.rotateX(-Math.PI / 2);
+  const abOuterMat = new THREE.MeshBasicMaterial({
+    color: 0x4488ff,
+    transparent: true,
+    opacity: 0.25,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  afterburnerOuter = new THREE.Mesh(abOuterGeo, abOuterMat);
+  afterburnerOuter.position.set(0, 0, fLen * 0.62);
+  afterburnerOuter.visible = false;
+  aircraftGroup.add(afterburnerOuter);
+
+  // Afterburner point light for glow casting
+  const abLight = new THREE.PointLight(0xff6622, 0, fRad * 8);
+  abLight.position.set(0, 0, fLen * 0.55);
+  abLight.visible = false;
+  aircraftGroup.add(abLight);
+  afterburnerInner.userData.abLight = abLight;
 
   for (const side of [-1, 1]) {
     const ventral = markShadow(new THREE.Mesh(
@@ -1990,7 +2276,9 @@ function buildCockpitInterior(type, detail, mats, layout) {
 
   const cockpitPanelTex = createCockpitSurfaceTexture(detail.isHighDetail);
   const seatTex = createSeatFabricTexture(detail.isHighDetail);
-  aircraftDisposableTextures.push(cockpitPanelTex, seatTex);
+  const panelStyle = isFighter ? 'fighter' : (isJet ? 'jet' : 'prop');
+  const avionicsTex = createAvionicsPanelTexture(detail.isHighDetail, panelStyle);
+  aircraftDisposableTextures.push(cockpitPanelTex, seatTex, avionicsTex);
 
   const shellMat = new THREE.MeshStandardMaterial({
     color: 0x20242b,
@@ -2016,6 +2304,12 @@ function buildCockpitInterior(type, detail, mats, layout) {
     roughness: 0.6,
     metalness: 0.24,
   });
+  const panelSurfaceMat = new THREE.MeshStandardMaterial({
+    color: 0x232831,
+    map: avionicsTex,
+    roughness: 0.72,
+    metalness: 0.2,
+  });
   const displayMat = new THREE.MeshStandardMaterial({
     color: 0x081318,
     emissive: isFighter ? 0x22aa66 : 0x1b8eff,
@@ -2025,37 +2319,106 @@ function buildCockpitInterior(type, detail, mats, layout) {
   });
   cockpitNightMaterials.push(displayMat);
 
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(shellWidth, shellDepth), shellMat);
+  const shellSegments = detail.isLowDetail ? 12 : (detail.isHighDetail ? 26 : 18);
+
+  // Keep lower cockpit structure without wrapping around the camera frustum.
+  for (const side of [-1, 1]) {
+    const lowerSideTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(0.05, shellHeight * 0.28, shellDepth * 0.72),
+      shellMat
+    );
+    lowerSideTrim.position.set(side * (shellWidth * 0.44), cpY - 0.63, cpZ + 0.16);
+    cockpitGroup.add(lowerSideTrim);
+  }
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(shellWidth * 0.88, shellDepth * 0.86), shellMat);
   floor.rotation.x = -Math.PI / 2;
-  floor.position.set(0, cpY - 0.86, cpZ + 0.08);
+  floor.position.set(0, cpY - 0.86, cpZ + 0.09);
   cockpitGroup.add(floor);
 
   for (const side of [-1, 1]) {
-    const sideWall = new THREE.Mesh(
-      new THREE.BoxGeometry(0.05, shellHeight, shellDepth * 0.95),
-      shellMat
+    // Side consoles with rounded upper bolsters (less boxy than slab walls)
+    const consoleBase = new THREE.Mesh(
+      new THREE.BoxGeometry(0.085, 0.23, shellDepth * 0.68),
+      dashMat
     );
-    sideWall.position.set(side * (shellWidth * 0.5), cpY - 0.25, cpZ + 0.1);
-    cockpitGroup.add(sideWall);
+    consoleBase.position.set(side * (shellWidth * 0.33), cpY - 0.72, cpZ + 0.08);
+    cockpitGroup.add(consoleBase);
+
+    if (!isFighter) {
+      const bolster = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.047, 0.047, shellDepth * 0.7, shellSegments),
+        frameMat
+      );
+      bolster.rotation.x = Math.PI / 2;
+      bolster.position.set(side * (shellWidth * 0.33), cpY - 0.61, cpZ + 0.08);
+      cockpitGroup.add(bolster);
+    }
+
+    const sidePanelTop = new THREE.Mesh(
+      new THREE.PlaneGeometry(0.16, shellDepth * 0.54),
+      panelSurfaceMat
+    );
+    sidePanelTop.rotation.x = -Math.PI / 2;
+    sidePanelTop.rotation.z = side * 0.04;
+    sidePanelTop.position.set(side * (shellWidth * 0.31), cpY - 0.58, cpZ + 0.08);
+    cockpitGroup.add(sidePanelTop);
   }
 
-  const rearWall = new THREE.Mesh(new THREE.BoxGeometry(shellWidth, shellHeight, 0.04), shellMat);
-  rearWall.position.set(0, cpY - 0.24, cpZ + shellDepth * 0.5);
-  cockpitGroup.add(rearWall);
+  const rearBulkhead = new THREE.Mesh(new THREE.CircleGeometry(shellWidth * 0.47, shellSegments), shellMat);
+  rearBulkhead.scale.y = shellHeight / (shellWidth * 0.95);
+  rearBulkhead.position.set(0, cpY - 0.24, cpZ + shellDepth * 0.5);
+  rearBulkhead.rotation.y = Math.PI;
+  cockpitGroup.add(rearBulkhead);
 
-  const dashDepth = isFighter ? 0.28 : (isJet ? 0.3 : 0.26);
-  const dashHeight = isFighter ? 0.36 : 0.42;
-  const dashY = cpY - 0.54;
-  const dashZ = cpZ - (isFighter ? 0.92 : (isJet ? 1.38 : 1.05));
+  const rearBulkheadRing = new THREE.Mesh(
+    new THREE.TorusGeometry(shellWidth * 0.47, 0.012, 8, shellSegments),
+    frameMat
+  );
+  rearBulkheadRing.scale.y = shellHeight / (shellWidth * 0.95);
+  rearBulkheadRing.position.set(0, cpY - 0.24, cpZ + shellDepth * 0.498);
+  rearBulkheadRing.rotation.y = Math.PI;
+  cockpitGroup.add(rearBulkheadRing);
 
-  const dash = new THREE.Mesh(new THREE.BoxGeometry(shellWidth * 0.86, dashHeight, dashDepth), dashMat);
-  dash.position.set(0, dashY, dashZ);
+  const dashDepth = isFighter ? 0.22 : (isJet ? 0.24 : 0.22);
+  const dashHeight = isFighter ? 0.3 : 0.34;
+  const dashY = cpY - (isFighter ? 0.34 : (isJet ? 0.3 : 0.28));
+  const dashZ = cpZ - (isFighter ? 0.72 : (isJet ? 0.92 : 0.76));
+
+  // Low-profile dash coaming (avoid curved occlusion across the lower viewport).
+  const dash = new THREE.Mesh(
+    new THREE.BoxGeometry(shellWidth * 0.84, dashHeight * 0.16, dashDepth * 0.34),
+    dashMat
+  );
+  dash.position.set(0, cpY - (isFighter ? 0.64 : (isJet ? 0.6 : 0.58)), dashZ - dashDepth * 0.05);
+  dash.rotation.x = -0.08;
   cockpitGroup.add(dash);
 
-  const glare = new THREE.Mesh(new THREE.BoxGeometry(shellWidth * 0.88, 0.02, dashDepth * 0.65), frameMat);
-  glare.position.set(0, dashY + dashHeight * 0.5 + 0.01, dashZ - dashDepth * 0.25);
-  glare.rotation.x = -0.32;
+  const dashFace = new THREE.Mesh(new THREE.PlaneGeometry(shellWidth * 0.84, dashHeight * 0.24), panelSurfaceMat);
+  dashFace.position.set(0, cpY - (isFighter ? 0.54 : (isJet ? 0.5 : 0.48)), dashZ + dashDepth * 0.28);
+  dashFace.rotation.x = -0.03;
+  cockpitGroup.add(dashFace);
+
+  const glare = new THREE.Mesh(new THREE.BoxGeometry(shellWidth * 0.7, 0.008, dashDepth * 0.2), frameMat);
+  glare.position.set(0, cpY - (isFighter ? 0.52 : (isJet ? 0.49 : 0.47)), dashZ - dashDepth * 0.24);
+  glare.rotation.x = -0.2;
   cockpitGroup.add(glare);
+
+  // Minimal interior windshield framing.
+  // Exterior canopy/glass already carries most structure; keep interior bars subtle.
+  const windFrameMat = new THREE.MeshStandardMaterial({ color: 0x2b3138, roughness: 0.62, metalness: 0.18 });
+  const windZ = dashZ - (isJet ? 0.22 : 0.18);
+
+  if (isProp) {
+    const centerPost = new THREE.Mesh(new THREE.BoxGeometry(0.01, shellHeight * 0.42, 0.02), windFrameMat);
+    centerPost.position.set(0, cpY - 0.03, windZ - 0.03);
+    centerPost.rotation.x = -0.1;
+    cockpitGroup.add(centerPost);
+  } else if (isJet) {
+    // Jet cockpit view should stay mostly unobstructed here; exterior model already has frame geometry.
+  } else if (isFighter) {
+    // Keep fighter bow out of direct sightline.
+  }
 
   const panelWidth = detail.isLowDetail ? 640 : (detail.isHighDetail ? 1280 : 1024);
   const panelHeight = Math.round(panelWidth * 0.375);
@@ -2074,56 +2437,80 @@ function buildCockpitInterior(type, detail, mats, layout) {
     new THREE.PlaneGeometry(shellWidth * (isJet ? 0.8 : 0.72), dashHeight * 0.9),
     new THREE.MeshBasicMaterial({ map: cockpitTexture })
   );
-  panelPlane.position.set(0, dashY - 0.01, dashZ + dashDepth * 0.52 + 0.01);
+  panelPlane.position.set(0, dashY + (isJet ? 0.07 : 0.03), dashZ + dashDepth * 0.52 + 0.01);
   cockpitPanel = panelPlane;
   cockpitGroup.add(panelPlane);
 
   const pedestal = new THREE.Mesh(
-    new THREE.BoxGeometry(isJet ? 0.32 : 0.24, isFighter ? 0.2 : 0.28, isJet ? 0.72 : 0.46),
+    new THREE.CapsuleGeometry(isJet ? 0.1 : 0.085, isFighter ? 0.03 : 0.1, 5, shellSegments),
     dashMat
   );
+  pedestal.scale.set(1, 1, isJet ? 2.2 : 1.8);
   pedestal.position.set(0, cpY - 0.66, cpZ + (isFighter ? 0.06 : 0.03));
   cockpitGroup.add(pedestal);
 
+  const pedestalTop = new THREE.Mesh(
+    new THREE.PlaneGeometry(isJet ? 0.28 : 0.2, isJet ? 0.95 : 0.62),
+    panelSurfaceMat
+  );
+  pedestalTop.rotation.x = -Math.PI / 2;
+  pedestalTop.position.set(0, pedestal.position.y + 0.09, pedestal.position.z + (isJet ? 0.02 : 0));
+  cockpitGroup.add(pedestalTop);
+
+  const throttleQuadrant = new THREE.Mesh(
+    new THREE.BoxGeometry(isJet ? 0.16 : 0.1, 0.08, isJet ? 0.22 : 0.14),
+    frameMat
+  );
+  throttleQuadrant.position.set(0, pedestal.position.y + 0.12, pedestal.position.z - 0.08);
+  cockpitGroup.add(throttleQuadrant);
+
   const leverCount = isFighter ? 1 : 2;
   for (let i = 0; i < leverCount; i++) {
-    const offset = leverCount === 1 ? 0 : (i - 0.5) * 0.09;
-    const throttleStem = new THREE.Mesh(new THREE.CylinderGeometry(0.01, 0.013, 0.11, 8), frameMat);
-    throttleStem.position.set(offset, pedestal.position.y + 0.08, pedestal.position.z - 0.14);
+    const offset = leverCount === 1 ? 0 : (i - 0.5) * (isJet ? 0.06 : 0.045);
+    const throttleStem = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.012, isJet ? 0.12 : 0.1, 10), frameMat);
+    throttleStem.position.set(offset, throttleQuadrant.position.y + 0.055, throttleQuadrant.position.z + 0.01);
     cockpitGroup.add(throttleStem);
 
-    const throttleGrip = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.045, 0.03), frameMat);
-    throttleGrip.position.set(offset, pedestal.position.y + 0.14, pedestal.position.z - 0.14);
+    const throttleGrip = new THREE.Mesh(
+      new THREE.CapsuleGeometry(isJet ? 0.016 : 0.013, isJet ? 0.018 : 0.014, 4, 8),
+      frameMat
+    );
+    throttleGrip.scale.z = 0.75;
+    throttleGrip.position.set(offset, throttleQuadrant.position.y + 0.125, throttleQuadrant.position.z + 0.012);
     cockpitGroup.add(throttleGrip);
   }
 
   if (isProp) {
-    const yokeStem = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.3, 8), frameMat);
-    yokeStem.position.set(0, cpY - 0.56, cpZ - 0.62);
-    yokeStem.rotation.x = -0.45;
+    const yokeStem = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.017, 0.22, 10), frameMat);
+    yokeStem.position.set(0, cpY - 0.64, cpZ - 0.66);
+    yokeStem.rotation.x = -0.22;
     cockpitGroup.add(yokeStem);
 
-    const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.09, 0.012, 8, 14, Math.PI), frameMat);
-    yoke.position.set(0, cpY - 0.43, cpZ - 0.73);
-    yoke.rotation.x = Math.PI * 0.55;
+    const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.01, 8, 18), frameMat);
+    yoke.position.set(0, cpY - 0.56, cpZ - 0.76);
     cockpitGroup.add(yoke);
+
+    const yokeBar = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.012, 0.012), frameMat);
+    yokeBar.position.set(0, cpY - 0.56, cpZ - 0.76);
+    cockpitGroup.add(yokeBar);
+
+    for (const side of [-1, 1]) {
+      const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.009, 0.009, 0.04, 8), frameMat);
+      grip.rotation.z = Math.PI / 2;
+      grip.position.set(side * 0.072, cpY - 0.56, cpZ - 0.76);
+      cockpitGroup.add(grip);
+    }
   } else if (isJet) {
     for (const side of [-1, 1]) {
-      const yokeStem = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.018, 0.26, 8), frameMat);
-      yokeStem.position.set(side * 0.3, cpY - 0.58, cpZ - 0.94);
-      yokeStem.rotation.x = -0.52;
+      const yokeStem = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.016, 0.18, 8), frameMat);
+      yokeStem.position.set(side * 0.29, cpY - 0.63, cpZ - 0.76);
+      yokeStem.rotation.x = -0.26;
       cockpitGroup.add(yokeStem);
 
-      const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.078, 0.011, 8, 12, Math.PI), frameMat);
-      yoke.position.set(side * 0.3, cpY - 0.45, cpZ - 1.02);
-      yoke.rotation.x = Math.PI * 0.55;
+      const yoke = new THREE.Mesh(new THREE.TorusGeometry(0.048, 0.009, 8, 14), frameMat);
+      yoke.position.set(side * 0.29, cpY - 0.54, cpZ - 0.82);
       cockpitGroup.add(yoke);
     }
-
-    const upperMfd = new THREE.Mesh(new THREE.PlaneGeometry(0.44, 0.16), displayMat);
-    upperMfd.position.set(0, dashY + 0.13, dashZ + 0.14);
-    upperMfd.rotation.x = -0.12;
-    cockpitGroup.add(upperMfd);
   } else {
     const sideStick = new THREE.Mesh(new THREE.CylinderGeometry(0.013, 0.017, 0.24, 8), frameMat);
     sideStick.position.set(0.23, cpY - 0.55, cpZ + 0.06);
@@ -2135,41 +2522,66 @@ function buildCockpitInterior(type, detail, mats, layout) {
     cockpitGroup.add(sideGrip);
 
     const hudGlass = new THREE.Mesh(
-      new THREE.PlaneGeometry(0.16, 0.14),
+      new THREE.PlaneGeometry(0.11, 0.09),
       new THREE.MeshStandardMaterial({
         color: 0x91ffbf,
         emissive: 0x2b6849,
-        emissiveIntensity: 0.2,
+        emissiveIntensity: 0.06,
         transparent: true,
-        opacity: 0.12,
+        opacity: 0.035,
         side: THREE.DoubleSide,
         depthWrite: false,
       })
     );
-    hudGlass.position.set(0, cpY + 0.1, cpZ - 0.84);
-    hudGlass.rotation.x = -0.16;
+    hudGlass.position.set(0, cpY + 0.03, cpZ - 0.72);
+    hudGlass.rotation.x = -0.12;
     cockpitGroup.add(hudGlass);
 
-    const mfdBar = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.12), displayMat);
-    mfdBar.position.set(0, dashY + 0.1, dashZ + 0.15);
-    mfdBar.rotation.x = -0.1;
-    cockpitGroup.add(mfdBar);
   }
 
   const seatCount = isFighter ? 1 : 2;
   for (let i = 0; i < seatCount; i++) {
     const x = seatCount === 1 ? 0 : (i - 0.5) * 0.56;
-    const seatBack = new THREE.Mesh(new THREE.BoxGeometry(isFighter ? 0.4 : 0.34, 0.56, 0.08), seatMat);
+    const seatWidth = isFighter ? 0.21 : 0.17;
+
+    const seatBack = new THREE.Mesh(
+      new THREE.CapsuleGeometry(seatWidth, 0.24, 5, shellSegments),
+      seatMat
+    );
+    seatBack.scale.z = 0.28;
     seatBack.position.set(x, cpY - 0.08, cpZ + 0.24);
     cockpitGroup.add(seatBack);
 
-    const seatBottom = new THREE.Mesh(new THREE.BoxGeometry(isFighter ? 0.4 : 0.34, 0.065, 0.34), seatMat);
+    const seatBottom = new THREE.Mesh(
+      new THREE.SphereGeometry(1, shellSegments, Math.max(8, Math.floor(shellSegments * 0.6))),
+      seatMat
+    );
+    seatBottom.scale.set(seatWidth * 1.9, 0.085, isFighter ? 0.26 : 0.22);
     seatBottom.position.set(x, cpY - 0.5, cpZ + 0.1);
     cockpitGroup.add(seatBottom);
 
-    const headrest = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.16, 0.06), seatMat);
+    if (isJet) {
+      for (const side of [-1, 1]) {
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.34), frameMat);
+        arm.position.set(x + side * 0.19, cpY - 0.37, cpZ + 0.14);
+        cockpitGroup.add(arm);
+      }
+    }
+
+    const headrest = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.08, 0.05, 4, shellSegments),
+      seatMat
+    );
+    headrest.scale.z = 0.45;
     headrest.position.set(x, cpY + 0.25, cpZ + 0.27);
     cockpitGroup.add(headrest);
+
+    const headrestRodMat = new THREE.MeshStandardMaterial({ color: 0x8a919b, roughness: 0.35, metalness: 0.72 });
+    for (const side of [-1, 1]) {
+      const rod = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 0.16, 8), headrestRodMat);
+      rod.position.set(x + side * 0.04, cpY + 0.17, cpZ + 0.265);
+      cockpitGroup.add(rod);
+    }
 
     const beltMat = new THREE.MeshStandardMaterial({ color: 0x595f69, roughness: 0.8, metalness: 0.06 });
     for (const side of [-1, 1]) {
@@ -2179,7 +2591,6 @@ function buildCockpitInterior(type, detail, mats, layout) {
       cockpitGroup.add(belt);
     }
   }
-
 
   const cockpitLight = new THREE.PointLight(0xffead2, 0.15, 3.4, 2);
   cockpitLight.position.set(0, cpY + 0.34, cpZ + 0.02);
@@ -2214,14 +2625,26 @@ export function buildAircraftModel(scene, type) {
   cockpitCtx = null;
   cockpitTexture = null;
   cockpitPanel = null;
+  afterburnerInner = null;
+  afterburnerOuter = null;
+  mainWing = null;
 
   const detail = getAircraftDetailConfig();
 
   const variant = resolveAircraftVariant(type);
   const mats = createAircraftMaterialSet(type, detail, variant);
 
+  // 4B: Panel line bump texture on medium/high detail
+  if (!detail.isLowDetail) {
+    const panelTex = createPanelLineTexture();
+    aircraftDisposableTextures.push(panelTex);
+    mats.bodyMat.bumpMap = panelTex;
+    mats.bodyMat.bumpScale = 0.005;
+    mats.bodyMat.needsUpdate = true;
+  }
+
   let layout;
-  if (variant === 'cessna_172') {
+  if (variant === 'cessna_172' || variant === 'extra_300') {
     layout = buildCessnaExterior(type, detail, mats);
   } else if (variant === 'f16') {
     layout = buildF16Exterior(type, detail, mats);
@@ -2237,11 +2660,6 @@ export function buildAircraftModel(scene, type) {
   addAircraftLights(detail, layout);
   addSharedAirframeDetails(detail, mats, layout, type, variant);
   buildCockpitInterior(type, detail, mats, layout);
-
-  // Apply toon outlines to major body parts (fuselage, wings, tail)
-  for (const part of exteriorBodyParts) {
-    addOutline(part, 0.04);
-  }
 
   return {
     aircraftGroup,
@@ -2269,6 +2687,9 @@ export function buildAircraftModel(scene, type) {
     cockpitCtx,
     cockpitTexture,
     cockpitPanel,
+    afterburnerInner,
+    afterburnerOuter,
+    mainWing,
     layout,
   };
 }

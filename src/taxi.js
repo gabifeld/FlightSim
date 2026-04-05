@@ -149,7 +149,7 @@ let guideLightGroup = null;
 
 export function initTaxiGuidance(scene) {
   guideLightGroup = new THREE.Group();
-  const lightGeo = new THREE.BoxGeometry(0.3, 0.15, 0.3);
+  const lightGeo = new THREE.BoxGeometry(0.5, 0.2, 0.5);
   const lightMat = new THREE.MeshStandardMaterial({
     color: 0x00ff00,
     emissive: 0x00ff00,
@@ -192,7 +192,7 @@ export function updateTaxiGuidance(route, aircraftX, aircraftZ) {
         (lx - aircraftX) ** 2 + (lz - aircraftZ) ** 2
       );
       if (distToAircraft < 200) {
-        guideLights[lightIdx].position.set(lx, 0.1, lz);
+        guideLights[lightIdx].position.set(lx, 0.25, lz);
         guideLights[lightIdx].visible = true;
         lightIdx++;
       }
@@ -213,6 +213,14 @@ function isOnRunway(x, z) {
   if (_isOnIntlRunway && _isOnIntlRunway(x, z)) return true;
   if (_isOnIntlTaxiway && _isOnIntlTaxiway(x, z)) return true;
   return false;
+}
+
+export function getHoldShortNodes() {
+  return {
+    rwy_mid: nodeMap['rwy_mid'],
+    rwy_s: nodeMap['rwy_s'],
+    rwy_n: nodeMap['rwy_n'],
+  };
 }
 
 let _isOnIntlRunway = null;

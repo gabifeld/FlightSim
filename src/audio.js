@@ -26,6 +26,21 @@ let cockpitGain;
 // Creak throttle
 let lastCreakTime = 0;
 
+// Crosswind audio
+let crosswindSource;
+let crosswindFilter;
+let crosswindGain;
+let crosswindPanner;
+
+// Airframe buffet rattle
+let buffetSource;
+let buffetFilter;
+let buffetGain;
+let currentBuffetIntensity = 0;
+
+// Shared noise buffer (reused for fire-and-forget sounds)
+let sharedNoiseBuffer = null;
+
 function createNoiseBuffer(duration) {
   const sampleRate = ctx.sampleRate;
   const length = sampleRate * duration;
@@ -46,10 +61,11 @@ export function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)();
   initialized = true;
 
-  // Master gain for global volume control
+  // Master gain for global volume control — fade in to prevent click/pop
   masterGain = ctx.createGain();
-  masterGain.gain.value = 0.8;
+  masterGain.gain.value = 0;
   masterGain.connect(ctx.destination);
+  masterGain.gain.setTargetAtTime(0.8, ctx.currentTime, 0.1);
 
   // Engine: smooth sine harmonics for warm drone (not harsh sawtooth)
   engineGain = ctx.createGain();
@@ -126,6 +142,9 @@ export function initAudio() {
   // Pre-allocate thunder noise buffer
   thunderBuffer = createNoiseBuffer(2);
 
+  // Shared noise buffer for fire-and-forget sounds
+  sharedNoiseBuffer = createNoiseBuffer(2);
+
   // Wind rush: bandpass-filtered noise, scales with airspeed
   windRushGain = ctx.createGain();
   windRushGain.gain.value = 0;
@@ -172,6 +191,43 @@ export function initAudio() {
   cockpitNoiseSource.start();
 
   cockpitGain.connect(masterGain);
+
+  // ── Crosswind audio: bandpass noise 400-1200Hz with stereo panning ────
+  crosswindGain = ctx.createGain();
+  crosswindGain.gain.value = 0;
+  crosswindFilter = ctx.createBiquadFilter();
+  crosswindFilter.type = 'bandpass';
+  crosswindFilter.frequency.value = 800; // center of 400-1200Hz
+  crosswindFilter.Q.value = 0.6;
+  crosswindPanner = ctx.createStereoPanner();
+  crosswindPanner.pan.value = 0;
+
+  const crosswindBuf = createNoiseBuffer(2);
+  crosswindSource = ctx.createBufferSource();
+  crosswindSource.buffer = crosswindBuf;
+  crosswindSource.loop = true;
+  crosswindSource.connect(crosswindFilter);
+  crosswindFilter.connect(crosswindGain);
+  crosswindGain.connect(crosswindPanner);
+  crosswindPanner.connect(masterGain);
+  crosswindSource.start();
+
+  // ── Airframe buffet rattle: low-frequency bandpass noise 80-150Hz ─────
+  buffetGain = ctx.createGain();
+  buffetGain.gain.value = 0;
+  buffetFilter = ctx.createBiquadFilter();
+  buffetFilter.type = 'bandpass';
+  buffetFilter.frequency.value = 115; // center of 80-150Hz
+  buffetFilter.Q.value = 3;
+
+  const buffetBuf = createNoiseBuffer(2);
+  buffetSource = ctx.createBufferSource();
+  buffetSource.buffer = buffetBuf;
+  buffetSource.loop = true;
+  buffetSource.connect(buffetFilter);
+  buffetFilter.connect(buffetGain);
+  buffetGain.connect(masterGain);
+  buffetSource.start();
 }
 
 export function updateAudio(state, dt, cameraMode) {
@@ -191,7 +247,7 @@ export function updateAudio(state, dt, cameraMode) {
   engineFilter.frequency.setTargetAtTime(200 + throttle * 600, now, 0.15);
 
   // Wind: gentler volume scaling from speed
-  const speed = state.speed;
+  const speed = Number.isFinite(state.speed) ? state.speed : 0;
   const windVol = Math.min(speed / 120, 1.0) * 0.15;
   windGain.gain.setTargetAtTime(windVol, now, 0.2);
   windFilter.frequency.setTargetAtTime(600 + speed * 12, now, 0.2);
@@ -213,6 +269,32 @@ export function updateAudio(state, dt, cameraMode) {
   const stallAoa = (state.config && state.config.stallAoa) || 0.38; // fallback ~22deg
   const isStalling = Math.abs(state.aoa) > stallAoa && speed > 5;
   stallGain.gain.setTargetAtTime(isStalling ? 0.3 : 0, now, 0.05);
+
+  // ── Crosswind audio ─────────────────────────────────────────────────
+  if (crosswindGain && crosswindPanner && state.heading !== undefined) {
+    // Compute perpendicular wind component relative to aircraft heading
+    const windDir = state.windDirection || 0;   // radians, direction wind is FROM
+    const windSpd = state.windSpeed || 0;       // m/s
+    const heading = state.heading || 0;         // radians
+
+    // Angle between wind direction and aircraft heading
+    const relAngle = windDir - heading;
+    // Perpendicular component (crosswind): sin of relative angle
+    const crossComponent = Math.sin(relAngle) * windSpd;
+    // Absolute crosswind intensity, normalized (assume max useful wind ~30 m/s)
+    const crossIntensity = Math.min(Math.abs(crossComponent) / 30, 1.0);
+
+    // Volume: 0 to 0.08
+    crosswindGain.gain.setTargetAtTime(crossIntensity * 0.08, now, 0.2);
+
+    // Stereo pan: wind from left = -0.5, wind from right = +0.5
+    // crossComponent > 0 means wind from the right side
+    const panValue = Math.max(-0.5, Math.min(0.5, crossComponent / 30));
+    crosswindPanner.pan.setTargetAtTime(panValue, now, 0.1);
+
+    // Shift filter frequency based on crosswind strength (400-1200Hz range)
+    crosswindFilter.frequency.setTargetAtTime(400 + crossIntensity * 800, now, 0.2);
+  }
 }
 
 export function setRainVolume(intensity) {
@@ -430,6 +512,107 @@ export function canPlayCreak() {
   return true;
 }
 
+export function playExplosion() {
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // Layer 1: Deep boom
+  const boomOsc = ctx.createOscillator();
+  boomOsc.type = 'sine';
+  boomOsc.frequency.setValueAtTime(80, now);
+  boomOsc.frequency.exponentialRampToValueAtTime(20, now + 0.5);
+  const boomGain = ctx.createGain();
+  boomGain.gain.setValueAtTime(0.5, now);
+  boomGain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+  boomOsc.connect(boomGain);
+  boomGain.connect(masterGain);
+  boomOsc.start(now);
+  boomOsc.stop(now + 0.9);
+
+  // Layer 2: Crackle (filtered noise)
+  const crackleSource = ctx.createBufferSource();
+  crackleSource.buffer = createNoiseBuffer(1.0);
+  const crackleFilter = ctx.createBiquadFilter();
+  crackleFilter.type = 'bandpass';
+  crackleFilter.frequency.value = 1200;
+  crackleFilter.Q.value = 1;
+  const crackleGain = ctx.createGain();
+  crackleGain.gain.setValueAtTime(0.4, now);
+  crackleGain.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+  crackleSource.connect(crackleFilter);
+  crackleFilter.connect(crackleGain);
+  crackleGain.connect(masterGain);
+  crackleSource.start(now);
+  crackleSource.stop(now + 1.0);
+
+  // Layer 3: Rumble tail
+  const rumbleSource = ctx.createBufferSource();
+  rumbleSource.buffer = createNoiseBuffer(2.0);
+  const rumbleFilter = ctx.createBiquadFilter();
+  rumbleFilter.type = 'lowpass';
+  rumbleFilter.frequency.value = 200;
+  const rumbleGain = ctx.createGain();
+  rumbleGain.gain.setValueAtTime(0, now);
+  rumbleGain.gain.linearRampToValueAtTime(0.25, now + 0.1);
+  rumbleGain.gain.exponentialRampToValueAtTime(0.001, now + 1.8);
+  rumbleSource.connect(rumbleFilter);
+  rumbleFilter.connect(rumbleGain);
+  rumbleGain.connect(masterGain);
+  rumbleSource.start(now);
+  rumbleSource.stop(now + 2.0);
+}
+
+export function playMissileLaunch() {
+  if (!ctx) return;
+  const now = ctx.currentTime;
+
+  // Layer 1: Whoosh — rising filtered noise
+  const whooshSource = ctx.createBufferSource();
+  whooshSource.buffer = createNoiseBuffer(0.8);
+  const whooshFilter = ctx.createBiquadFilter();
+  whooshFilter.type = 'bandpass';
+  whooshFilter.frequency.setValueAtTime(800, now);
+  whooshFilter.frequency.exponentialRampToValueAtTime(3000, now + 0.3);
+  whooshFilter.Q.value = 2;
+  const whooshGain = ctx.createGain();
+  whooshGain.gain.setValueAtTime(0.4, now);
+  whooshGain.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+  whooshSource.connect(whooshFilter);
+  whooshFilter.connect(whooshGain);
+  whooshGain.connect(masterGain);
+  whooshSource.start(now);
+  whooshSource.stop(now + 0.8);
+
+  // Layer 2: Ignition thump — low sine pop
+  const thumpOsc = ctx.createOscillator();
+  thumpOsc.type = 'sine';
+  thumpOsc.frequency.setValueAtTime(120, now);
+  thumpOsc.frequency.exponentialRampToValueAtTime(40, now + 0.15);
+  const thumpGain = ctx.createGain();
+  thumpGain.gain.setValueAtTime(0.35, now);
+  thumpGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+  thumpOsc.connect(thumpGain);
+  thumpGain.connect(masterGain);
+  thumpOsc.start(now);
+  thumpOsc.stop(now + 0.25);
+
+  // Layer 3: Rocket hiss — high frequency noise tail
+  const hissSource = ctx.createBufferSource();
+  hissSource.buffer = createNoiseBuffer(1.5);
+  const hissFilter = ctx.createBiquadFilter();
+  hissFilter.type = 'highpass';
+  hissFilter.frequency.value = 4000;
+  const hissGain = ctx.createGain();
+  hissGain.gain.setValueAtTime(0, now);
+  hissGain.gain.linearRampToValueAtTime(0.15, now + 0.1);
+  hissGain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+  hissSource.connect(hissFilter);
+  hissFilter.connect(hissGain);
+  hissGain.connect(masterGain);
+  hissSource.start(now);
+  hissSource.stop(now + 1.5);
+}
+
 export function playAPDisconnect() {
   if (!ctx) return;
   // Two quick descending tones
@@ -446,4 +629,57 @@ export function playAPDisconnect() {
   gain.connect(masterGain);
   osc.start();
   osc.stop(ctx.currentTime + 0.5);
+}
+
+// ── New exports: Gust sound, Buffet intensity ───────────────────────────────
+
+/**
+ * Play a short wind gust noise burst. Fire-and-forget.
+ * @param {number} intensity - 0..1 gust strength
+ */
+export function playGustSound(intensity) {
+  if (!ctx || !masterGain || intensity <= 0) return;
+  const now = ctx.currentTime;
+
+  // Short 0.2s noise burst, bandpass 200-800Hz, sharp attack, 0.3s exponential decay
+  const source = ctx.createBufferSource();
+  source.buffer = sharedNoiseBuffer || createNoiseBuffer(0.6);
+
+  const filter = ctx.createBiquadFilter();
+  filter.type = 'bandpass';
+  filter.frequency.value = 500; // center of 200-800Hz
+  filter.Q.value = 0.5;
+
+  const gain = ctx.createGain();
+  const vol = Math.min(intensity, 1.0) * 0.12;
+  // Sharp attack: ramp to full volume in 0.01s
+  gain.gain.setValueAtTime(0.001, now);
+  gain.gain.linearRampToValueAtTime(vol, now + 0.01);
+  // Exponential decay over 0.3s
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+  source.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  source.start(now);
+  source.stop(now + 0.5);
+}
+
+/**
+ * Set airframe buffet rattle intensity. Driven by flight model buffet state.
+ * @param {number} intensity - 0..1, 0 = silence, 1 = full rattle
+ */
+export function setBuffetIntensity(intensity) {
+  if (!ctx || !buffetGain) return;
+  const now = ctx.currentTime;
+  const clamped = Math.max(0, Math.min(1, intensity));
+  currentBuffetIntensity = clamped;
+
+  if (clamped > 0) {
+    // Continuous bandpass noise at volume = intensity * 0.06
+    buffetGain.gain.setTargetAtTime(clamped * 0.06, now, 0.05);
+  } else {
+    // Fade to silence over 0.3s
+    buffetGain.gain.setTargetAtTime(0, now, 0.3);
+  }
 }

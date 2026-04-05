@@ -271,15 +271,15 @@ export function updateAirportLights(dt) {
     }
   }
 
-  // Update emissive intensity based on night mode (boosted for no-PointLight compensation)
-  const emissiveMul = nightMode ? 5.0 : 0.3;
+  // Update emissive intensity based on night mode (boosted heavily for visibility)
+  const emissiveMul = nightMode ? 10.0 : 0.3;
   if (edgeInstanced) edgeInstanced.material.emissiveIntensity = emissiveMul;
-  if (threshGreenInstanced) threshGreenInstanced.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
-  if (threshRedInstanced) threshRedInstanced.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
-  if (taxiBlueInstanced) taxiBlueInstanced.material.emissiveIntensity = nightMode ? 4.0 : 0.3;
+  if (threshGreenInstanced) threshGreenInstanced.material.emissiveIntensity = nightMode ? 12.0 : 0.3;
+  if (threshRedInstanced) threshRedInstanced.material.emissiveIntensity = nightMode ? 12.0 : 0.3;
+  if (taxiBlueInstanced) taxiBlueInstanced.material.emissiveIntensity = nightMode ? 8.0 : 0.3;
 
   // PAPI lights emissive update
   for (const papi of papiLights) {
-    papi.mesh.material.emissiveIntensity = nightMode ? 6.0 : 0.3;
+    papi.mesh.material.emissiveIntensity = nightMode ? 12.0 : 0.3;
   }
 }

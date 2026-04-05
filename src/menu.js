@@ -1,8 +1,11 @@
-// Menu system: main menu, pause menu, settings panel, controls reference
+// Menu system: main menu, pause menu, settings panel, controls reference, pilot log
 import { getSetting, setSetting } from './settings.js';
 import { setMasterVolume } from './audio.js';
 import { setTimeOfDay, getTimeOfDay } from './scene.js';
 import { applyGraphicsQuality } from './graphics.js';
+import { setFailureMode, getFailureMode } from './failures.js';
+import { getCareerState, getRank, getXP, getXPForNextRank, getRankProgress } from './career.js';
+import { getAllAchievements } from './achievements.js';
 
 // Helper: listen for both click and touchend to ensure mobile compatibility.
 // Prevents double-fire by consuming the event on touchend.
@@ -39,6 +42,7 @@ export function initMenu() {
     pauseMenu: document.getElementById('pause-menu'),
     settingsPanel: document.getElementById('settings-panel'),
     controlsPanel: document.getElementById('controls-panel'),
+    pilotPanel: document.getElementById('pilot-panel'),
     // Main menu buttons
     btnFly: document.getElementById('menu-fly'),
     btnMainSettings: document.getElementById('menu-main-settings'),
@@ -59,9 +63,15 @@ export function initMenu() {
     // Graphics + FPS
     graphicsSelect: document.getElementById('setting-graphics'),
     fpsToggle: document.getElementById('setting-fps'),
+    failuresSelect: document.getElementById('setting-failures'),
+    realismSelect: document.getElementById('setting-realism'),
     // Back buttons
     btnSettingsBack: document.getElementById('settings-back'),
     btnControlsBack: document.getElementById('controls-back'),
+    btnPilotBack: document.getElementById('pilot-back'),
+    // Pilot log buttons
+    btnMainPilot: document.getElementById('menu-main-pilot'),
+    btnPausePilot: document.getElementById('menu-pause-pilot'),
   };
 
   // Main menu buttons
@@ -142,6 +152,13 @@ export function initMenu() {
     });
   }
 
+  // ATC toggle
+  const atcEl = document.getElementById('setting-atc');
+  if (atcEl) {
+    atcEl.checked = getSetting('atcEnabled') !== false;
+    atcEl.addEventListener('change', () => setSetting('atcEnabled', atcEl.checked));
+  }
+
   if (els.fuelToggle) {
     els.fuelToggle.checked = getSetting('unlimitedFuel');
     els.fuelToggle.addEventListener('change', () => {
@@ -167,6 +184,22 @@ export function initMenu() {
     });
   }
 
+  if (els.failuresSelect) {
+    els.failuresSelect.value = getFailureMode();
+    els.failuresSelect.addEventListener('change', () => {
+      const mode = els.failuresSelect.value;
+      setFailureMode(mode);
+      setSetting('failureMode', mode);
+    });
+  }
+
+  if (els.realismSelect) {
+    els.realismSelect.value = getSetting('realism');
+    els.realismSelect.addEventListener('change', () => {
+      setSetting('realism', els.realismSelect.value);
+    });
+  }
+
   // Back buttons
   onTap(els.btnSettingsBack, () => {
     transitionTo(returnTo || 'main');
@@ -174,6 +207,31 @@ export function initMenu() {
 
   onTap(els.btnControlsBack, () => {
     transitionTo(returnTo || 'main');
+  });
+
+  // Pilot log buttons
+  onTap(els.btnMainPilot, () => {
+    returnTo = 'main';
+    transitionTo('pilot');
+  });
+  onTap(els.btnPausePilot, () => {
+    returnTo = 'pause';
+    transitionTo('pilot');
+  });
+  onTap(els.btnPilotBack, () => {
+    transitionTo(returnTo || 'main');
+  });
+
+  // Pilot log tab switching
+  const pilotTabs = document.querySelectorAll('.pilot-tab');
+  pilotTabs.forEach(tab => {
+    onTap(tab, () => {
+      pilotTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      document.querySelectorAll('.pilot-tab-content').forEach(c => c.style.display = 'none');
+      const target = document.getElementById('pilot-' + tab.dataset.tab);
+      if (target) target.style.display = '';
+    });
   });
 
   // Show main menu on load
@@ -200,6 +258,7 @@ function hideAllPanels() {
   if (els.pauseMenu) els.pauseMenu.classList.add('hidden');
   if (els.settingsPanel) els.settingsPanel.classList.add('hidden');
   if (els.controlsPanel) els.controlsPanel.classList.add('hidden');
+  if (els.pilotPanel) els.pilotPanel.classList.add('hidden');
 }
 
 function transitionTo(name) {
@@ -241,10 +300,77 @@ function showPanel(name) {
       if (els.fuelToggle) {
         els.fuelToggle.checked = getSetting('unlimitedFuel');
       }
+      // Sync failure mode
+      if (els.failuresSelect) {
+        els.failuresSelect.value = getFailureMode();
+      }
       break;
     case 'controls':
       if (els.controlsPanel) els.controlsPanel.classList.remove('hidden');
       break;
+    case 'pilot':
+      if (els.pilotPanel) els.pilotPanel.classList.remove('hidden');
+      populatePilotLog();
+      break;
+  }
+}
+
+function populatePilotLog() {
+  const state = getCareerState();
+  const rank = getRank();
+  const xp = getXP();
+  const nextXP = getXPForNextRank();
+  const progress = getRankProgress();
+
+  // Career tab
+  const rankEl = document.getElementById('pilot-rank');
+  if (rankEl) rankEl.textContent = rank.toUpperCase();
+  const fillEl = document.getElementById('pilot-xp-fill');
+  if (fillEl) fillEl.style.width = (progress * 100) + '%';
+  const xpText = document.getElementById('pilot-xp-text');
+  if (xpText) xpText.textContent = `${xp} / ${nextXP} XP`;
+  const nextEl = document.getElementById('pilot-next-unlock');
+  if (nextEl) {
+    const ranks = ['Student Pilot', 'Private Pilot', 'Commercial', 'ATP', 'Captain'];
+    const idx = ranks.findIndex(r => r.toLowerCase().replace(/ /g, '_') === rank || r.toLowerCase() === rank);
+    if (idx < ranks.length - 1) nextEl.textContent = 'Next: ' + ranks[idx + 1];
+    else nextEl.textContent = 'MAX RANK';
+  }
+
+  // Stats tab
+  const setStatEl = (id, val) => { const el = document.getElementById(id); if (el) el.textContent = val; };
+  setStatEl('stat-flights', state.flights || 0);
+  const totalSec = state.totalFlightTimeSec || 0;
+  const hrs = Math.floor(totalSec / 3600);
+  const mins = Math.floor((totalSec % 3600) / 60);
+  setStatEl('stat-time', `${hrs}h ${mins}m`);
+  setStatEl('stat-airports', `${(state.firstVisits || []).length} / 6`);
+  setStatEl('stat-aircraft', `${(state.firstAircraft || []).length} / 5`);
+
+  // Achievements tab — build DOM safely (no innerHTML)
+  const listEl = document.getElementById('achievements-list');
+  if (listEl) {
+    listEl.textContent = ''; // clear
+    const all = getAllAchievements();
+    for (const a of all) {
+      const item = document.createElement('div');
+      item.className = 'achievement-item ' + (a.unlocked ? 'unlocked' : 'locked');
+      const nameDiv = document.createElement('div');
+      nameDiv.className = 'achievement-name';
+      nameDiv.textContent = a.name;
+      const descDiv = document.createElement('div');
+      descDiv.className = 'achievement-desc';
+      descDiv.textContent = a.description;
+      item.appendChild(nameDiv);
+      item.appendChild(descDiv);
+      if (a.unlocked) {
+        const badge = document.createElement('div');
+        badge.className = 'achievement-badge';
+        badge.textContent = '\u2713';
+        item.appendChild(badge);
+      }
+      listEl.appendChild(item);
+    }
   }
 }
 

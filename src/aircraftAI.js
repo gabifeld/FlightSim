@@ -204,74 +204,136 @@ function nodePos(airportId, nodeId) {
 function buildAIAircraftModel(isLarge) {
   const group = new THREE.Group();
 
-  const scale = isLarge ? 2.5 : 1.5;
+  // Match user aircraft style: flat Lambert materials (toon look)
   const bodyColor = isLarge ? 0xf0f0f0 : 0xeeeeee;
   const accentColor = isLarge ? 0x0055aa : 0x1144aa;
 
-  const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, metalness: 0.3, roughness: 0.5 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: accentColor, metalness: 0.3, roughness: 0.5 });
+  const bodyMat = new THREE.MeshLambertMaterial({ color: bodyColor });
+  const accentMat = new THREE.MeshLambertMaterial({ color: accentColor });
 
-  // Fuselage
-  const fuseLen = isLarge ? 14 : 8;
-  const fuseRad = isLarge ? 1.2 : 0.6;
-  const fuseGeo = new THREE.CylinderGeometry(fuseRad * 0.3, fuseRad, fuseLen, 8);
+  // Fuselage — cylinder with hemispherical nose
+  const fuseLen = isLarge ? 18 : 10;
+  const fuseRad = isLarge ? 1.4 : 0.7;
+  const fuseGeo = new THREE.CylinderGeometry(fuseRad, fuseRad, fuseLen, 12);
   fuseGeo.rotateX(Math.PI / 2);
   const fuse = new THREE.Mesh(fuseGeo, bodyMat);
+  fuse.castShadow = true;
   group.add(fuse);
 
-  // Wings
-  const wingSpan = isLarge ? 14 : 10;
-  const wingChord = isLarge ? 3 : 2;
-  const wingGeo = new THREE.BoxGeometry(wingSpan, 0.15, wingChord);
+  // Nose cone
+  const noseGeo = new THREE.ConeGeometry(fuseRad, fuseRad * 2.5, 12);
+  noseGeo.rotateX(-Math.PI / 2);
+  const nose = new THREE.Mesh(noseGeo, bodyMat);
+  nose.position.set(0, 0, -fuseLen / 2 - fuseRad * 1.2);
+  group.add(nose);
+
+  // Tail cone
+  const tailGeo = new THREE.ConeGeometry(fuseRad, fuseRad * 3, 12);
+  tailGeo.rotateX(Math.PI / 2);
+  const tail = new THREE.Mesh(tailGeo, bodyMat);
+  tail.position.set(0, 0, fuseLen / 2 + fuseRad * 1.3);
+  group.add(tail);
+
+  // Wings — swept back
+  const wingSpan = isLarge ? 16 : 11;
+  const wingChord = isLarge ? 3.5 : 2.2;
+  const wingThick = 0.2;
+  const wingGeo = new THREE.BoxGeometry(wingSpan, wingThick, wingChord);
   const wing = new THREE.Mesh(wingGeo, bodyMat);
-  wing.position.set(0, 0, 1);
+  wing.castShadow = true;
+  wing.position.set(0, -fuseRad * 0.2, fuseLen * 0.05);
   group.add(wing);
 
   // Tail vertical stabilizer
-  const tailGeo = new THREE.BoxGeometry(0.1, isLarge ? 3.5 : 2.5, isLarge ? 2.5 : 1.8);
-  const tail = new THREE.Mesh(tailGeo, accentMat);
-  tail.position.set(0, isLarge ? 1.8 : 1.2, fuseLen * 0.42);
-  group.add(tail);
+  const vstabH = isLarge ? 4 : 2.8;
+  const vstabGeo = new THREE.BoxGeometry(0.15, vstabH, isLarge ? 3 : 2);
+  const vstab = new THREE.Mesh(vstabGeo, accentMat);
+  vstab.position.set(0, vstabH / 2 + fuseRad * 0.3, fuseLen * 0.4);
+  group.add(vstab);
 
   // Horizontal stabilizer
-  const hstabGeo = new THREE.BoxGeometry(isLarge ? 5 : 3.5, 0.1, isLarge ? 1.5 : 1);
+  const hstabSpan = isLarge ? 6 : 4;
+  const hstabGeo = new THREE.BoxGeometry(hstabSpan, 0.12, isLarge ? 1.8 : 1.2);
   const hstab = new THREE.Mesh(hstabGeo, bodyMat);
-  hstab.position.set(0, isLarge ? 0.3 : 0.2, fuseLen * 0.42);
+  hstab.position.set(0, fuseRad * 0.5, fuseLen * 0.4);
   group.add(hstab);
 
-  // Engines (for jets)
+  // Engines (under wings for large, on fuselage for small)
   if (isLarge) {
     for (const side of [-1, 1]) {
-      const engGeo = new THREE.CylinderGeometry(0.55, 0.55, 2.5, 8);
+      // Engine nacelle
+      const engGeo = new THREE.CylinderGeometry(0.6, 0.6, 3, 10);
       engGeo.rotateX(Math.PI / 2);
       const eng = new THREE.Mesh(engGeo, accentMat);
-      eng.position.set(side * 4, -0.8, 0);
+      eng.position.set(side * wingSpan * 0.28, -fuseRad * 0.6, fuseLen * 0.05 - 0.5);
       group.add(eng);
+
+      // Engine intake ring
+      const intakeGeo = new THREE.TorusGeometry(0.6, 0.08, 8, 16);
+      intakeGeo.rotateY(Math.PI / 2);
+      const intake = new THREE.Mesh(intakeGeo, new THREE.MeshLambertMaterial({ color: 0x444444 }));
+      intake.position.set(side * wingSpan * 0.28, -fuseRad * 0.6, fuseLen * 0.05 - 2.0);
+      group.add(intake);
     }
   }
 
+  // Cockpit windows (dark strip on nose)
+  const windowGeo = new THREE.BoxGeometry(fuseRad * 1.2, fuseRad * 0.5, 0.05);
+  const windowMat = new THREE.MeshLambertMaterial({ color: 0x111122 });
+  const cockpitWindow = new THREE.Mesh(windowGeo, windowMat);
+  cockpitWindow.position.set(0, fuseRad * 0.4, -fuseLen / 2 + 0.5);
+  group.add(cockpitWindow);
+
   // Nav lights
+  const navGeo = new THREE.SphereGeometry(0.15, 4, 4);
   const navLeftMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
   const navRightMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-  const navGeo = new THREE.SphereGeometry(0.15, 4, 4);
   const navLeft = new THREE.Mesh(navGeo, navLeftMat);
-  navLeft.position.set(-wingSpan / 2, 0, 1);
+  navLeft.position.set(-wingSpan / 2, 0, fuseLen * 0.05);
   group.add(navLeft);
   const navRight = new THREE.Mesh(navGeo, navRightMat);
-  navRight.position.set(wingSpan / 2, 0, 1);
+  navRight.position.set(wingSpan / 2, 0, fuseLen * 0.05);
   group.add(navRight);
 
-  // Beacon (red flashing) — top and bottom
+  // Beacon (red flashing)
   const beaconMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true });
   const beaconGeo = new THREE.SphereGeometry(0.2, 4, 4);
   const beaconTop = new THREE.Mesh(beaconGeo, beaconMat);
-  beaconTop.position.set(0, fuseRad + 0.1, 0);
+  beaconTop.position.set(0, fuseRad + 0.15, 0);
   group.add(beaconTop);
   const beaconBot = new THREE.Mesh(beaconGeo, beaconMat.clone());
-  beaconBot.position.set(0, -fuseRad - 0.1, 0);
+  beaconBot.position.set(0, -fuseRad - 0.15, 0);
   group.add(beaconBot);
 
-  group.scale.setScalar(scale);
+  // Landing gear (simple struts + wheels)
+  const strutMat = new THREE.MeshStandardMaterial({ color: 0x444444 });
+  // Nose gear
+  const noseStrutGeo = new THREE.CylinderGeometry(0.05, 0.05, fuseRad * 1.5, 6);
+  const noseStrut = new THREE.Mesh(noseStrutGeo, strutMat);
+  noseStrut.position.set(0, -fuseRad * 1.0, -fuseLen * 0.3);
+  group.add(noseStrut);
+  const wheelGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.15, 8);
+  wheelGeo.rotateZ(Math.PI / 2);
+  const wheelMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
+  const noseWheel = new THREE.Mesh(wheelGeo, wheelMat);
+  noseWheel.position.set(0, -fuseRad * 1.7, -fuseLen * 0.3);
+  group.add(noseWheel);
+  // Main gear
+  for (const side of [-1, 1]) {
+    const mainStrut = new THREE.Mesh(noseStrutGeo, strutMat);
+    mainStrut.position.set(side * fuseRad * 1.2, -fuseRad * 1.0, fuseLen * 0.05);
+    group.add(mainStrut);
+    const mainWheel = new THREE.Mesh(wheelGeo, wheelMat);
+    mainWheel.position.set(side * fuseRad * 1.2, -fuseRad * 1.7, fuseLen * 0.05);
+    group.add(mainWheel);
+  }
+
+  // Airline livery stripe along fuselage
+  const stripeGeo = new THREE.BoxGeometry(fuseRad * 2.1, 0.15, fuseLen * 0.8);
+  const stripeMat = new THREE.MeshStandardMaterial({ color: accentColor });
+  const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+  stripe.position.set(0, fuseRad * 0.15, 0);
+  group.add(stripe);
 
   return { group, beaconTop, beaconBot, navLeft, navRight };
 }

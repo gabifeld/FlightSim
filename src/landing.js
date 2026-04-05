@@ -44,6 +44,7 @@ let scoreCallback = null;
 let landingAssistActive = false;
 let assistVsIntegral = 0;
 let assistSpdIntegral = 0;
+let assistLocIntegral = 0;
 
 export function isLandingMode() {
   return landingModeActive;
@@ -213,6 +214,7 @@ export function toggleLandingAssist() {
   landingAssistActive = !landingAssistActive;
   assistVsIntegral = 0;
   assistSpdIntegral = 0;
+  assistLocIntegral = 0;
 }
 
 export function isLandingAssistActive() {
@@ -223,6 +225,32 @@ export function disableLandingAssist() {
   landingAssistActive = false;
   assistVsIntegral = 0;
   assistSpdIntegral = 0;
+  assistLocIntegral = 0;
+}
+
+export function getApproachSpeedTarget(state, ils = null) {
+  const takeoffSpd = state.config ? state.config.takeoffSpeed : 55;
+  const type = state.config ? state.config.type : 'prop';
+
+  let factor = type === 'prop' ? 0.82 : (type === 'fighter' ? 0.9 : 0.84);
+  if (ils && ils.distNM > 6) factor += 0.08;
+  else if (ils && ils.distNM > 3) factor += 0.04;
+  if (!state.gear) factor += 0.04;
+  if (!state.flaps) factor += 0.05;
+
+  return clamp(takeoffSpd * factor, takeoffSpd * 0.68, takeoffSpd * 1.08);
+}
+
+export function getApproachTargetVS(state, ils) {
+  const refSpeed = Math.max(state.speed, getApproachSpeedTarget(state, ils) * 0.95);
+  const baseVs = -Math.tan(GLIDESLOPE_RAD) * refSpeed * MS_TO_FPM;
+  let targetVs = baseVs - (ils ? ils.gsDots * 320 : 0);
+
+  // Reduce sink rate in the flare window so assisted landings are controllable.
+  if (state.altitudeAGL < 60) targetVs = Math.max(targetVs, -320);
+  if (state.altitudeAGL < 25) targetVs = Math.max(targetVs, -160);
+
+  return clamp(targetVs, -1800, 250);
 }
 
 /**
@@ -252,16 +280,10 @@ export function updateLandingAssist(dt) {
     return null;
   }
 
-  const takeoffSpd = state.config ? state.config.takeoffSpeed : 55;
-  const vrefSpeed = takeoffSpd * 0.8; // approach speed ~80% of takeoff speed
-
+  const vrefSpeed = getApproachSpeedTarget(state, ils);
   const currentVsFpm = state.verticalSpeed * MS_TO_FPM;
 
-  // Glideslope tracking: use GS dots to compute a target VS
-  // -gsDots because: positive dots = above GS, so we need negative VS correction
-  // Scale: each dot ≈ 300 fpm correction, base descent ~-700 fpm
-  const baseVs = -Math.tan(GLIDESLOPE_RAD) * state.speed * MS_TO_FPM;
-  const targetVs = clamp(baseVs - ils.gsDots * 300, -1500, 200);
+  const targetVs = getApproachTargetVS(state, ils);
 
   // PI controller: VS error → pitch command
   // Matches autopilot vsPID gains: kp=0.003, ki=0.0005
@@ -270,8 +292,18 @@ export function updateLandingAssist(dt) {
   assistVsIntegral = clamp(assistVsIntegral, -2000, 2000);
 
   const pitchCommand = clamp(
-    vsErr * 0.003 + assistVsIntegral * 0.0005,
-    -0.8, 0.8
+    vsErr * 0.0024 + assistVsIntegral * 0.00025,
+    -0.55, 0.55
+  );
+
+  // Localizer roll guidance. Keep it gentle and centered so the assist
+  // will actually line the aircraft up instead of only chasing glideslope.
+  const locErr = -ils.locDots;
+  assistLocIntegral += locErr * dt;
+  assistLocIntegral = clamp(assistLocIntegral, -20, 20);
+  const rollCommand = clamp(
+    locErr * 0.18 + assistLocIntegral * 0.015,
+    -0.35, 0.35
   );
 
   // Auto-throttle: PI for speed hold
@@ -280,11 +312,11 @@ export function updateLandingAssist(dt) {
   assistSpdIntegral = clamp(assistSpdIntegral, -20, 20);
 
   const throttleCommand = clamp(
-    0.3 + spdErr * 0.06 + assistSpdIntegral * 0.01,
-    0.05, 0.8
+    0.34 + spdErr * 0.03 + assistSpdIntegral * 0.008,
+    0.08, 0.92
   );
 
-  return { pitchCommand, throttleCommand };
+  return { pitchCommand, rollCommand, throttleCommand };
 }
 
 export function getScoreData() {

@@ -24,15 +24,15 @@ export function buildCarModel(typeName) {
   body.receiveShadow = true;
   group.add(body);
 
-  // Cabin (windowed upper portion)
-  const cabinW = cfg.width * 0.9;
-  const cabinH = cfg.height * 0.45;
-  const cabinL = cfg.length * 0.5;
+  // Cabin (windowed upper portion) — set back from front to show hood
+  const cabinW = cfg.width * 0.88;
+  const cabinH = cfg.height * 0.42;
+  const cabinL = cfg.length * 0.4;
   const cabinGeo = new THREE.BoxGeometry(cabinW, cabinH, cabinL);
   const cabinMat = new THREE.MeshStandardMaterial({ color: 0x88bbdd, roughness: 0.1, metalness: 0.5, opacity: 0.7, transparent: true });
   const cabin = new THREE.Mesh(cabinGeo, cabinMat);
   cabin.position.y = cfg.height * 0.35 + cfg.height * 0.25 + cabinH * 0.5;
-  cabin.position.z = -cfg.length * 0.05;
+  cabin.position.z = cfg.length * 0.08; // Cabin sits toward rear, leaving visible hood in front
   group.add(cabin);
 
   // Wheels
@@ -55,20 +55,28 @@ export function buildCarModel(typeName) {
     wheels.push(w);
   }
 
-  // Headlights
-  const headlightGeo = new THREE.SphereGeometry(0.08, 6, 6);
-  const headlightMat = new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0xffffcc, emissiveIntensity: 0.5 });
+  // Headlights (front = -Z)
+  const headlightGeo = new THREE.SphereGeometry(0.12, 6, 6);
+  const headlightMat = new THREE.MeshStandardMaterial({ color: 0xffffcc, emissive: 0xffffcc, emissiveIntensity: 1.0 });
   for (const side of [-1, 1]) {
     const hl = new THREE.Mesh(headlightGeo, headlightMat);
-    hl.position.set(side * cfg.width * 0.35, cfg.height * 0.35, -cfg.length * 0.5);
+    hl.position.set(side * cfg.width * 0.35, cfg.height * 0.3, -cfg.length * 0.5);
     group.add(hl);
   }
 
-  // Tail lights
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff0000, emissiveIntensity: 0.3 });
+  // Hood/bumper (front visual indicator)
+  const bumperGeo = new THREE.BoxGeometry(cfg.width * 0.95, cfg.height * 0.15, 0.15);
+  const bumperMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 });
+  const bumper = new THREE.Mesh(bumperGeo, bumperMat);
+  bumper.position.set(0, cfg.height * 0.15, -cfg.length * 0.5);
+  group.add(bumper);
+
+  // Tail lights (back = +Z) — red and visible
+  const tailGeo = new THREE.SphereGeometry(0.1, 6, 6);
+  const tailMat = new THREE.MeshStandardMaterial({ color: 0xff2222, emissive: 0xff0000, emissiveIntensity: 0.5 });
   for (const side of [-1, 1]) {
-    const tl = new THREE.Mesh(headlightGeo, tailMat);
-    tl.position.set(side * cfg.width * 0.35, cfg.height * 0.35, cfg.length * 0.5);
+    const tl = new THREE.Mesh(tailGeo, tailMat);
+    tl.position.set(side * cfg.width * 0.35, cfg.height * 0.3, cfg.length * 0.5);
     group.add(tl);
   }
 
@@ -119,6 +127,11 @@ export function buildGroundVehicleModel(typeName) {
   const beacon = new THREE.Mesh(beaconGeo, beaconMat);
   beacon.position.y = cfg.height * 0.65 + cfg.height * 0.175 + 0.2;
   beacon.position.z = -cfg.length * 0.3;
+  // Special beacon for fire truck
+  if (typeName === 'fire_truck') {
+    beacon.material.color.setHex(0xff0000);
+    beacon.material.emissive.setHex(0xff0000);
+  }
   group.add(beacon);
 
   return { group, beacon };

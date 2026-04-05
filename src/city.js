@@ -1,5 +1,16 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { CITY_CENTER_X, CITY_CENTER_Z, CITY_SIZE } from './constants.js';
+
+// ── Infrastructure ───
+import { createGraph, addNode, addEdge, buildSpatialIndex, setCityGraph, clearRoadNetworkCache } from './roadGraph.js';
+import { getTerrainHeightCached, getGroundLevel } from './terrain.js';
+import { getTimeOfDay } from './scene.js';
+import { createStreetFurniture, updateStreetFurniture } from './streetFurniture.js';
+import { initPedestrians, updatePedestrians } from './pedestrians.js';
+
+let cityGraph = null;
+let _sceneRef = null;
 
 // ── Module state ──────────────────────────────────────────────────────
 const roadSegments = [];
@@ -12,6 +23,7 @@ let streetBulbMesh = null;
 let streetGlowMesh = null;
 let buildingWindowMesh = null;
 let obstructionLightMesh = null;
+let cityGlowPoints = null;
 
 function rebuildRoadCaches() {
   roadNetworkCache = Object.freeze(roadSegments.map(seg => Object.freeze({
@@ -665,6 +677,87 @@ function buildBuildings(scene, placements) {
   }
 }
 
+// ── Building Roofs ─────────────────────────────────────────────────────
+
+const ROOF_COLORS = [
+  new THREE.Color(0x5a4a3a), // dark brown
+  new THREE.Color(0x6b5b4b), // warm brown
+  new THREE.Color(0x4a5a5a), // dark teal
+  new THREE.Color(0x7a6a5a), // tan
+  new THREE.Color(0x3a4a3a), // dark green
+  new THREE.Color(0x8a7a6a), // light brown
+  new THREE.Color(0x5a5a6a), // slate
+  new THREE.Color(0x6a4a3a), // rust
+  new THREE.Color(0x4a4a4a), // dark gray
+  new THREE.Color(0x8a8a7a), // light gray
+];
+
+function buildRoofs(scene, placements) {
+  const { buildings } = placements;
+  if (buildings.length === 0) return;
+
+  const dummy = new THREE.Object3D();
+
+  // Flat roof planes on top of buildings
+  const roofGeo = new THREE.BoxGeometry(1, 0.15, 1);
+  const roofMat = new THREE.MeshLambertMaterial({ roughness: 0.95, metalness: 0.02 });
+  const roofMesh = new THREE.InstancedMesh(roofGeo, roofMat, buildings.length);
+  roofMesh.receiveShadow = true;
+
+  for (let i = 0; i < buildings.length; i++) {
+    const b = buildings[i];
+    dummy.position.set(b.x, b.h + 0.075, b.z);
+    dummy.scale.set(b.w + 0.2, 1, b.d + 0.2); // slight overhang
+    dummy.rotation.set(0, 0, 0);
+    dummy.updateMatrix();
+    roofMesh.setMatrixAt(i, dummy.matrix);
+    roofMesh.setColorAt(i, ROOF_COLORS[Math.floor(sr() * ROOF_COLORS.length)]);
+  }
+  roofMesh.instanceMatrix.needsUpdate = true;
+  roofMesh.instanceColor.needsUpdate = true;
+  scene.add(roofMesh);
+
+  // Roof edge trim / parapet for taller buildings
+  const tallBuildings = buildings.filter(b => b.h > 12);
+  if (tallBuildings.length > 0) {
+    const trimGeo = new THREE.BoxGeometry(1, 1, 1);
+    const trimMat = new THREE.MeshLambertMaterial({ color: 0x777777, roughness: 0.9 });
+    // 4 trim pieces per building (N, S, E, W walls on roof edge)
+    const trimMesh = new THREE.InstancedMesh(trimGeo, trimMat, tallBuildings.length * 4);
+    let idx = 0;
+
+    for (const b of tallBuildings) {
+      const parapetH = 0.6;
+      const y = b.h + parapetH / 2;
+
+      // North wall
+      dummy.position.set(b.x, y, b.z - b.d / 2);
+      dummy.scale.set(b.w + 0.3, parapetH, 0.2);
+      dummy.rotation.set(0, 0, 0);
+      dummy.updateMatrix();
+      trimMesh.setMatrixAt(idx++, dummy.matrix);
+
+      // South wall
+      dummy.position.set(b.x, y, b.z + b.d / 2);
+      dummy.updateMatrix();
+      trimMesh.setMatrixAt(idx++, dummy.matrix);
+
+      // East wall
+      dummy.position.set(b.x + b.w / 2, y, b.z);
+      dummy.scale.set(0.2, parapetH, b.d + 0.3);
+      dummy.updateMatrix();
+      trimMesh.setMatrixAt(idx++, dummy.matrix);
+
+      // West wall
+      dummy.position.set(b.x - b.w / 2, y, b.z);
+      dummy.updateMatrix();
+      trimMesh.setMatrixAt(idx++, dummy.matrix);
+    }
+    trimMesh.instanceMatrix.needsUpdate = true;
+    scene.add(trimMesh);
+  }
+}
+
 // ── Rooftop details ───────────────────────────────────────────────────
 
 function buildRooftopDetails(scene, placements) {
@@ -1002,6 +1095,45 @@ function buildStreetLights(scene) {
 
   streetBulbMesh = bulbMesh;
   streetGlowMesh = glowMesh;
+
+  // Far-visibility glow points — visible from altitude as orange dots
+  const glowPointsGeo = new THREE.BufferGeometry();
+  const glowPositions = new Float32Array(lights.length * 3);
+  for (let i = 0; i < lights.length; i++) {
+    glowPositions[i * 3] = lights[i].x;
+    glowPositions[i * 3 + 1] = poleH + 0.5;
+    glowPositions[i * 3 + 2] = lights[i].z;
+  }
+  glowPointsGeo.setAttribute('position', new THREE.BufferAttribute(glowPositions, 3));
+
+  // Procedural glow texture
+  const glowCanvas = document.createElement('canvas');
+  glowCanvas.width = 32;
+  glowCanvas.height = 32;
+  const glowCtx = glowCanvas.getContext('2d');
+  const grad = glowCtx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(255, 220, 150, 1.0)');
+  grad.addColorStop(0.3, 'rgba(255, 200, 100, 0.6)');
+  grad.addColorStop(0.7, 'rgba(255, 180, 80, 0.15)');
+  grad.addColorStop(1, 'rgba(255, 160, 60, 0.0)');
+  glowCtx.fillStyle = grad;
+  glowCtx.fillRect(0, 0, 32, 32);
+  const glowTexture = new THREE.CanvasTexture(glowCanvas);
+
+  const glowPointsMat = new THREE.PointsMaterial({
+    map: glowTexture,
+    size: 30,
+    transparent: true,
+    opacity: 0.7,
+    depthWrite: false,
+    sizeAttenuation: true,
+    blending: THREE.AdditiveBlending,
+    color: 0xffcc77,
+  });
+  cityGlowPoints = new THREE.Points(glowPointsGeo, glowPointsMat);
+  cityGlowPoints.visible = false; // shown at night
+  cityGlowPoints.frustumCulled = false;
+  scene.add(cityGlowPoints);
 }
 
 // ── City ground plane ─────────────────────────────────────────────────
@@ -1058,6 +1190,88 @@ function buildGroundPlane(scene) {
   scene.add(mesh);
 }
 
+// ── Build road graph that matches the visual grid exactly ──────────────
+
+function buildGraphFromVisualGrid() {
+  const graph = createGraph();
+  const Y = 0.15;
+  let nodeId = 0;
+  let edgeId = 0;
+
+  // Recreate the same offsets as buildRoads
+  const nsOffs = [0]; // major at center
+  const ewOffs = [0];
+  for (let d = -HALF + GRID; d < HALF; d += GRID) {
+    if (Math.abs(d) < ROAD_MAJOR) continue;
+    nsOffs.push(d);
+    ewOffs.push(d);
+  }
+  nsOffs.sort((a, b) => a - b);
+  ewOffs.sort((a, b) => a - b);
+
+  // Create a node at every intersection
+  const nodeGrid = {}; // "nsIdx,ewIdx" -> nodeId
+  for (let ni = 0; ni < nsOffs.length; ni++) {
+    for (let ei = 0; ei < ewOffs.length; ei++) {
+      const x = CITY_CENTER_X + nsOffs[ni];
+      const z = CITY_CENTER_Z + ewOffs[ei];
+      const id = nodeId++;
+      const terrainY = getTerrainHeightCached(x, z);
+      addNode(graph, { id, x, y: Math.max(terrainY, Y), z, edges: [] });
+      nodeGrid[`${ni},${ei}`] = id;
+    }
+  }
+
+  // Classify road types: major=arterial, every 3rd=collector, rest=local
+  function classifyRoad(offset) {
+    if (offset === 0) return 'arterial';
+    if (Math.round(offset / GRID) % 3 === 0) return 'collector';
+    return 'local';
+  }
+  function roadWidth(type) { return type === 'arterial' ? ROAD_MAJOR : ROAD_MINOR; }
+  function roadLanes(type) { return type === 'arterial' ? 4 : type === 'collector' ? 2 : 2; }
+  function roadSpeed(type) { return type === 'arterial' ? 50 : type === 'collector' ? 40 : 30; }
+
+  // Add NS edges (vertical roads)
+  for (let ni = 0; ni < nsOffs.length; ni++) {
+    const rtype = classifyRoad(nsOffs[ni]);
+    const w = roadWidth(rtype);
+    for (let ei = 0; ei < ewOffs.length - 1; ei++) {
+      const fromId = nodeGrid[`${ni},${ei}`];
+      const toId = nodeGrid[`${ni},${ei + 1}`];
+      addEdge(graph, {
+        id: edgeId++, from: fromId, to: toId,
+        lanes: roadLanes(rtype), width: w,
+        type: rtype,
+        speedLimit: roadSpeed(rtype),
+        sidewalks: true, parking: rtype === 'local' ? 'street' : 'none',
+        district: 'downtown',
+      });
+    }
+  }
+
+  // Add EW edges (horizontal roads)
+  for (let ei = 0; ei < ewOffs.length; ei++) {
+    const rtype = classifyRoad(ewOffs[ei]);
+    const w = roadWidth(rtype);
+    for (let ni = 0; ni < nsOffs.length - 1; ni++) {
+      const fromId = nodeGrid[`${ni},${ei}`];
+      const toId = nodeGrid[`${ni + 1},${ei}`];
+      addEdge(graph, {
+        id: edgeId++, from: fromId, to: toId,
+        lanes: roadLanes(rtype), width: w,
+        type: rtype,
+        speedLimit: roadSpeed(rtype),
+        sidewalks: true, parking: rtype === 'local' ? 'street' : 'none',
+        district: 'downtown',
+      });
+    }
+  }
+
+  buildSpatialIndex(graph);
+  return graph;
+}
+
 // ── Public API ────────────────────────────────────────────────────────
 
 export function createCity(scene) {
@@ -1068,6 +1282,7 @@ export function createCity(scene) {
 
   buildSidewalks(scene, placements);
   buildBuildings(scene, placements);
+  buildRoofs(scene, placements);
   buildRooftopDetails(scene, placements);
   buildParks(scene, placements);
   buildStreetLights(scene);
@@ -1075,20 +1290,40 @@ export function createCity(scene) {
 
   const total = placements.buildings.length + placements.podiums.length;
   console.log(`[City] ${total} buildings, ${placements.podiums.length} podiums, ${roadSegments.length} roads, ${roadIntersections.length} intersections, ${placements.parkBlocks.length} parks`);
+
+  _sceneRef = scene;
+
+  // ── Build road graph matching the visual grid ──
+  cityGraph = buildGraphFromVisualGrid();
+  setCityGraph(cityGraph);
+  clearRoadNetworkCache();
+  console.log(`[City] road graph: ${cityGraph.nodes.size} nodes, ${cityGraph.edges.size} edges`);
+
+  // ── Systems that use the aligned road graph ──
+  createStreetFurniture(scene, cityGraph);
+  initPedestrians(scene, cityGraph);
+  initCityTraffic(scene);
 }
 
 export function updateCityNight(isNight) {
   if (streetBulbMesh) {
-    streetBulbMesh.material.emissiveIntensity = isNight ? 2.5 : 0.3;
+    streetBulbMesh.material.emissiveIntensity = isNight ? 8.0 : 0.3;
   }
   if (streetGlowMesh) {
     streetGlowMesh.visible = isNight;
+    if (isNight && streetGlowMesh.material) {
+      streetGlowMesh.material.opacity = 0.35;
+    }
   }
   if (buildingWindowMesh) {
     buildingWindowMesh.visible = isNight;
   }
   if (obstructionLightMesh) {
-    obstructionLightMesh.material.emissiveIntensity = isNight ? 3.0 : 0.2;
+    obstructionLightMesh.material.emissiveIntensity = isNight ? 6.0 : 0.2;
+  }
+  // Far-visibility glow points for aerial view
+  if (cityGlowPoints) {
+    cityGlowPoints.visible = isNight;
   }
 }
 
@@ -1106,4 +1341,167 @@ export function getRoadNetwork() {
  */
 export function getRoadIntersections() {
   return roadIntersectionsCache;
+}
+
+export function updateCity(dt, cameraPos) {
+  const timeOfDay = getTimeOfDay();
+  updateCityTraffic(dt);
+  updateStreetFurniture(dt, timeOfDay, cameraPos);
+  updatePedestrians(dt, timeOfDay, cameraPos);
+}
+
+// ── City Traffic — drives on the VISIBLE road segments ─────────────────
+
+const CT_MAX = 50;
+const CT_CAR_COLORS = [0x3366cc, 0xcc3333, 0x33cc33, 0xcccc33, 0xffffff, 0x555555, 0x884422, 0x224488, 0xcc6600, 0x663399];
+let ctMesh = null;
+let ctTruckMesh = null;
+const ctVehicles = [];
+const ctDummy = new THREE.Object3D();
+
+function initCityTraffic(scene) {
+  if (roadSegments.length === 0) return;
+
+  // Cars — merged body + cabin geometry
+  const carBody = new THREE.BoxGeometry(1.8, 0.7, 4);
+  carBody.translate(0, 0.35, 0);
+  const carCabin = new THREE.BoxGeometry(1.6, 0.55, 2.0);
+  carCabin.translate(0, 0.9, 0.3);
+  const carGeo = mergeGeometries([carBody, carCabin]);
+  const carMat = new THREE.MeshLambertMaterial();
+  ctMesh = new THREE.InstancedMesh(carGeo, carMat, CT_MAX);
+  ctMesh.castShadow = true;
+  ctMesh.count = 0;
+  scene.add(ctMesh);
+
+  // Trucks — cab + cargo merged
+  const truckCab = new THREE.BoxGeometry(2.0, 1.5, 2.2);
+  truckCab.translate(0, 0.85, -1.8);
+  const truckCargo = new THREE.BoxGeometry(2.2, 1.8, 5.0);
+  truckCargo.translate(0, 1.0, 1.3);
+  const truckGeo = mergeGeometries([truckCab, truckCargo]);
+  const truckMat = new THREE.MeshLambertMaterial({ color: 0x666666 });
+  ctTruckMesh = new THREE.InstancedMesh(truckGeo, truckMat, 12);
+  ctTruckMesh.castShadow = true;
+  ctTruckMesh.count = 0;
+  scene.add(ctTruckMesh);
+
+  // Spawn initial vehicles on random road segments
+  for (let i = 0; i < 30; i++) {
+    spawnCityVehicle();
+  }
+
+  if (ctMesh.instanceColor) ctMesh.instanceColor.needsUpdate = true;
+  if (ctTruckMesh.instanceColor) ctTruckMesh.instanceColor.needsUpdate = true;
+}
+
+function spawnCityVehicle() {
+  if (ctVehicles.length >= CT_MAX) return;
+  if (roadSegments.length === 0) return;
+
+  const seg = roadSegments[Math.floor(Math.random() * roadSegments.length)];
+  const isTruck = Math.random() < 0.15;
+  const mesh = isTruck ? ctTruckMesh : ctMesh;
+  if (!mesh || mesh.count >= mesh.instanceMatrix.count) return;
+
+  const direction = Math.random() < 0.5 ? 1 : -1;
+  const t = Math.random();
+  const speed = 8 + Math.random() * 14; // 8-22 m/s
+
+  // Lane offset perpendicular to road direction
+  const dx = seg.end.x - seg.start.x;
+  const dz = seg.end.z - seg.start.z;
+  const len = Math.sqrt(dx * dx + dz * dz) || 1;
+  const laneOffset = direction * (seg.width * 0.2 + Math.random() * 1.5);
+
+  const idx = mesh.count;
+  mesh.count++;
+
+  const color = new THREE.Color(CT_CAR_COLORS[Math.floor(Math.random() * CT_CAR_COLORS.length)]);
+  mesh.setColorAt(idx, isTruck ? new THREE.Color(0x555555 + Math.floor(Math.random() * 0x333333)) : color);
+
+  ctVehicles.push({
+    seg,
+    t,
+    speed: speed * (isTruck ? 0.6 : 1),
+    direction,
+    laneOffset,
+    isTruck,
+    meshIdx: idx,
+    mesh,
+    perpX: -dz / len,
+    perpZ: dx / len,
+    segDx: dx,
+    segDz: dz,
+    segLen: len,
+  });
+}
+
+function updateCityTraffic(dt) {
+  if (!ctMesh || ctVehicles.length === 0) return;
+
+  // Spawn check
+  if (ctVehicles.length < CT_MAX && Math.random() < dt * 0.5) {
+    spawnCityVehicle();
+  }
+
+  for (let i = ctVehicles.length - 1; i >= 0; i--) {
+    const v = ctVehicles[i];
+    const tDelta = (v.speed * dt * v.direction) / v.segLen;
+    v.t += tDelta;
+
+    // When reaching end, pick a new random segment
+    if (v.t > 1 || v.t < 0) {
+      // Find a connecting segment
+      const endX = v.direction > 0 ? v.seg.end.x : v.seg.start.x;
+      const endZ = v.direction > 0 ? v.seg.end.z : v.seg.start.z;
+      let nextSeg = null;
+      let bestDist = 30; // max 30m to find connecting road
+      for (const s of roadSegments) {
+        if (s === v.seg) continue;
+        const d1 = Math.hypot(s.start.x - endX, s.start.z - endZ);
+        const d2 = Math.hypot(s.end.x - endX, s.end.z - endZ);
+        const d = Math.min(d1, d2);
+        if (d < bestDist) {
+          bestDist = d;
+          nextSeg = s;
+          v.direction = d1 < d2 ? 1 : -1;
+        }
+      }
+      if (nextSeg) {
+        v.seg = nextSeg;
+        v.t = v.direction > 0 ? 0.01 : 0.99;
+        const ndx = nextSeg.end.x - nextSeg.start.x;
+        const ndz = nextSeg.end.z - nextSeg.start.z;
+        const nlen = Math.sqrt(ndx * ndx + ndz * ndz) || 1;
+        v.perpX = -ndz / nlen;
+        v.perpZ = ndx / nlen;
+        v.segDx = ndx;
+        v.segDz = ndz;
+        v.segLen = nlen;
+        v.laneOffset = v.direction * (nextSeg.width * 0.2 + Math.random() * 1.5);
+      } else {
+        // No connecting road — reverse
+        v.t = Math.max(0, Math.min(1, v.t));
+        v.direction *= -1;
+        v.laneOffset *= -1;
+      }
+    }
+
+    // Position on road
+    const ct = Math.max(0, Math.min(1, v.t));
+    const wx = v.seg.start.x + v.segDx * ct + v.perpX * v.laneOffset;
+    const wz = v.seg.start.z + v.segDz * ct + v.perpZ * v.laneOffset;
+    const gy = getGroundLevel(wx, wz);
+
+    const heading = Math.atan2(v.segDx, v.segDz) + (v.direction < 0 ? Math.PI : 0);
+
+    ctDummy.position.set(wx, gy + (v.isTruck ? 1.1 : 0.7), wz);
+    ctDummy.rotation.set(0, heading, 0);
+    ctDummy.updateMatrix();
+    v.mesh.setMatrixAt(v.meshIdx, ctDummy.matrix);
+  }
+
+  ctMesh.instanceMatrix.needsUpdate = true;
+  if (ctTruckMesh.count > 0) ctTruckMesh.instanceMatrix.needsUpdate = true;
 }

@@ -1,6 +1,5 @@
-// Screen-space speed lines using a fullscreen quad with custom shader
-// Lines radiate from center, opacity scales with airspeed
-// Only visible above 150 knots in chase/orbit camera
+// Screen-space high-speed airflow streaks.
+// Kept subtle and peripheral to avoid the anime-like radial burst look.
 import * as THREE from 'three';
 import { MS_TO_KNOTS } from './constants.js';
 
@@ -25,22 +24,25 @@ export function initSpeedLines(camera) {
       uniform float time;
       varying vec2 vUv;
 
+      float hash(vec2 p) {
+        return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+      }
+
       void main() {
-        vec2 center = vUv - 0.5;
-        float dist = length(center);
-        float angle = atan(center.y, center.x);
+        vec2 p = vUv * 2.0 - 1.0;
+        float dist = length(p);
+        float angle = atan(p.y, p.x);
 
-        // Radial lines
-        float lines = pow(abs(sin(angle * 40.0 + time * 2.0)), 16.0);
+        // Peripheral mask keeps the center clear.
+        float peripheral = smoothstep(0.45, 0.9, dist) * (1.0 - smoothstep(0.98, 1.08, dist));
 
-        // Mask to edges only (distance from center > 0.6)
-        float edgeMask = smoothstep(0.35, 0.55, dist);
+        // Long, sparse streaks with soft breakup.
+        float spokes = pow(abs(sin(angle * 22.0 + time * 1.4)), 14.0);
+        float breakup = 0.72 + hash(vUv * 420.0 + vec2(time * 3.0, time * 5.0)) * 0.28;
 
-        // Fade at very edge to avoid hard cutoff
-        float outerFade = 1.0 - smoothstep(0.48, 0.52, dist);
-
-        float alpha = lines * edgeMask * outerFade * opacity;
-        gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
+        float alpha = spokes * breakup * peripheral * opacity;
+        vec3 tint = vec3(0.90, 0.94, 1.0);
+        gl_FragColor = vec4(tint, alpha);
       }
     `,
     transparent: true,
@@ -67,11 +69,11 @@ export function updateSpeedLines(speed, cameraMode, dt) {
   const knots = speed * MS_TO_KNOTS;
   const isChaseOrOrbit = cameraMode === 'chase' || cameraMode === 'orbit';
 
-  if (isChaseOrOrbit && knots > 150) {
-    const targetOpacity = Math.min((knots - 150) / 100, 0.35);
-    material.uniforms.opacity.value += (targetOpacity - material.uniforms.opacity.value) * Math.min(dt * 3, 1);
+  if (isChaseOrOrbit && knots > 220) {
+    const targetOpacity = Math.min((knots - 220) / 220, 0.12);
+    material.uniforms.opacity.value += (targetOpacity - material.uniforms.opacity.value) * Math.min(dt * 2.2, 1);
   } else {
-    material.uniforms.opacity.value *= Math.max(1 - dt * 5, 0);
+    material.uniforms.opacity.value *= Math.max(1 - dt * 4, 0);
   }
 
   if (mesh) {

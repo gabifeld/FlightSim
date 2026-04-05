@@ -125,7 +125,7 @@ function createAsphaltTexture(size) {
 let runwayTextureCache = null;
 const asphaltTextureCache = new Map();
 
-function getRunwayTexture() {
+export function getRunwayTexture() {
   if (!runwayTextureCache) runwayTextureCache = createRunwayTexture();
   return runwayTextureCache;
 }
@@ -159,6 +159,13 @@ function addInstancedBoxes(scene, geometry, material, positions) {
   return mesh;
 }
 
+// Registered generic airport runway zones (for KFSM, KFSG, KFSC)
+const _genericRunwayZones = [];
+
+export function registerGenericRunway(cx, cz, halfLength, halfWidth, headingRad) {
+  _genericRunwayZones.push({ cx, cz, halfLength, halfWidth, headingRad });
+}
+
 export function isOnRunway(x, z) {
   // Airport 1 at origin
   if (Math.abs(x) < RUNWAY_WIDTH / 2 && Math.abs(z) < RUNWAY_LENGTH / 2) return true;
@@ -166,6 +173,17 @@ export function isOnRunway(x, z) {
   if (Math.abs(x - AIRPORT2_X) < RUNWAY_WIDTH / 2 && Math.abs(z - AIRPORT2_Z) < RUNWAY_LENGTH / 2) return true;
   // International airport (E-W runways) — imported lazily to avoid circular deps
   if (_isOnIntlRunway && _isOnIntlRunway(x, z)) return true;
+  // Generic airports (KFSM, KFSG, KFSC)
+  for (const rz of _genericRunwayZones) {
+    const dx = x - rz.cx;
+    const dz = z - rz.cz;
+    // Rotate point into runway-local coordinates
+    const cos = Math.cos(-rz.headingRad);
+    const sin = Math.sin(-rz.headingRad);
+    const lx = dx * cos - dz * sin;
+    const lz = dx * sin + dz * cos;
+    if (Math.abs(lx) < rz.halfWidth + 5 && Math.abs(lz) < rz.halfLength + 30) return true;
+  }
   return false;
 }
 
@@ -766,7 +784,7 @@ function createParkingGarage(scene, x, z) {
   scene.add(group);
 }
 
-function createPAPI(scene, x, z) {
+export function createPAPI(scene, x, z) {
   const whiteMat = new THREE.MeshStandardMaterial({
     color: 0xffffff,
     emissive: 0xffffff,
@@ -864,7 +882,7 @@ function createSecondAirport(scene) {
   });
 }
 
-function createWindsock(scene, x, z) {
+export function createWindsock(scene, x, z) {
   const pole = new THREE.Mesh(
     new THREE.CylinderGeometry(0.15, 0.15, 8, 6),
     new THREE.MeshStandardMaterial({ color: 0x888888, metalness: 0.5 })

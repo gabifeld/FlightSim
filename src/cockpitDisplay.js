@@ -1,4 +1,6 @@
 import { MS_TO_KNOTS, M_TO_FEET, MS_TO_FPM } from './constants.js';
+import { getEngineState, getEngineCount } from './systemsEngine.js';
+import { isInstrumentsPowered } from './electrical.js';
 
 const DEG = Math.PI / 180;
 
@@ -739,6 +741,15 @@ export function drawPropPanel(ctx, state, w, h) {
   ctx.fillStyle = '#111111';
   ctx.fillRect(0, 0, w, h);
 
+  // Dark gauges when instruments unpowered
+  if (!isInstrumentsPowered()) {
+    ctx.fillStyle = '#222';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('--- NO POWER ---', w / 2, h / 2);
+    return;
+  }
+
   const speed = state.speed * MS_TO_KNOTS;
   const alt = state.altitude * M_TO_FEET;
   const vs = state.verticalSpeed * MS_TO_FPM;
@@ -985,6 +996,14 @@ export function drawJetPanel(ctx, state, w, h) {
   ctx.fillStyle = '#0A0F1A';
   ctx.fillRect(0, 0, w, h);
 
+  if (!isInstrumentsPowered()) {
+    ctx.fillStyle = '#222';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('--- NO POWER ---', w / 2, h / 2);
+    return;
+  }
+
   const throttle = state.throttle * 100;
 
   // ── Left PFD ──
@@ -1134,6 +1153,14 @@ export function drawJetPanel(ctx, state, w, h) {
 export function drawFighterPanel(ctx, state, w, h) {
   ctx.fillStyle = '#050505';
   ctx.fillRect(0, 0, w, h);
+
+  if (!isInstrumentsPowered()) {
+    ctx.fillStyle = '#111';
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('--- NO POWER ---', w / 2, h / 2);
+    return;
+  }
 
   // Subtle scan lines (batched into single path for performance)
   ctx.beginPath();

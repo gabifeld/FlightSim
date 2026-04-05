@@ -2,9 +2,11 @@
 // Modes: HDG, ALT, VS, SPD, APR
 
 import { getActiveVehicle, isAircraft } from './vehicleState.js';
-import { computeILSGuidance } from './landing.js';
+import { computeILSGuidance, getApproachSpeedTarget, getApproachTargetVS } from './landing.js';
 import { clamp } from './utils.js';
 import { MS_TO_FPM, M_TO_FEET } from './constants.js';
+import { getCrossTrackError, getDesiredTrack, getVNAVTargetVS, isFlightPlanActive, getBearingToActive } from './flightplan.js';
+import { getNavReceiver } from './radio.js';
 
 // PID controller
 class PID {
@@ -51,6 +53,8 @@ const ap = {
   vsMode: false,
   spdHold: false,
   aprMode: false,
+  lnavMode: false,
+  vnavMode: false,
 
   targetHeading: 0,
   targetAltitude: 0,
@@ -76,6 +80,7 @@ const vsPID = new PID(0.003, 0.0005, 0.001, -1, 1);      // pitch output
 const spdPID = new PID(0.15, 0.02, 0.05, -0.2, 0.2);     // throttle delta/sec
 const locPID = new PID(0.04, 0.002, 0.015, -1, 1);        // roll output from localizer
 const gsPID = new PID(0.6, 0.03, 0.15, -800, 800);        // VS output from glideslope
+const lnavPID = new PID(0.0008, 0.00002, 0.0003, -1, 1);  // roll output from cross-track error
 
 // Normalize heading difference to -180..180
 function headingError(target, current) {
@@ -93,11 +98,14 @@ export function initAutopilot() {
   ap.vsMode = false;
   ap.spdHold = false;
   ap.aprMode = false;
+  ap.lnavMode = false;
+  ap.vnavMode = false;
   ap.locCaptured = false;
   ap.gsCaptured = false;
   ap.pitchCommand = 0;
   ap.rollCommand = 0;
   ap.throttleCommand = -1;
+  ap.disconnectReason = '';
 }
 
 export function isAPEngaged() {
@@ -168,10 +176,13 @@ export function toggleAPRMode() {
     ap.hdgHold = false;
     ap.altHold = false;
     ap.vsMode = false;
+    ap.lnavMode = false;
     ap.locCaptured = false;
     ap.gsCaptured = false;
     locPID.reset();
     gsPID.reset();
+    vsPID.reset();
+    spdPID.reset();
   }
 }
 
@@ -194,6 +205,8 @@ function disconnectAP(reason) {
   ap.vsMode = false;
   ap.spdHold = false;
   ap.aprMode = false;
+  ap.lnavMode = false;
+  ap.vnavMode = false;
   ap.locCaptured = false;
   ap.gsCaptured = false;
   ap.pitchCommand = 0;
@@ -208,6 +221,26 @@ function disconnectAP(reason) {
   spdPID.reset();
   locPID.reset();
   gsPID.reset();
+  lnavPID.reset();
+}
+
+export function toggleLNAVMode() {
+  if (!ap.engaged) return;
+  ap.lnavMode = !ap.lnavMode;
+  if (ap.lnavMode) {
+    ap.hdgHold = false;
+    ap.aprMode = false;
+    lnavPID.reset();
+  }
+}
+
+export function toggleVNAVMode() {
+  if (!ap.engaged) return;
+  ap.vnavMode = !ap.vnavMode;
+  if (ap.vnavMode) {
+    ap.altHold = false;
+    ap.vsMode = false;
+  }
 }
 
 export function updateAutopilot(dt) {
@@ -236,8 +269,25 @@ export function updateAutopilot(dt) {
     return;
   }
 
+  // Start from a neutral command set each frame so disabled modes do not
+  // leave stale pitch/roll inputs latched.
+  ap.pitchCommand = 0;
+  ap.rollCommand = 0;
+  ap.throttleCommand = -1;
+
+  // LNAV mode (flight plan lateral navigation)
+  if (ap.lnavMode && isFlightPlanActive()) {
+    const xte = getCrossTrackError(); // meters, positive = right of course
+    // Combine cross-track correction with desired track heading
+    const dtk = getDesiredTrack();
+    const hErr = headingError(dtk, state.heading);
+    // XTE provides additional correction (PID on cross-track error for roll)
+    const xteCorrection = lnavPID.update(-xte, dt);
+    const hCorrection = hdgPID.update(hErr, dt);
+    ap.rollCommand = clamp(hCorrection + xteCorrection, -0.44, 0.44);
+  }
   // Heading hold
-  if (ap.hdgHold) {
+  else if (ap.hdgHold) {
     const hErr = headingError(ap.targetHeading, state.heading);
     ap.rollCommand = hdgPID.update(hErr, dt);
     // Bank limit 25 degrees
@@ -256,16 +306,22 @@ export function updateAutopilot(dt) {
       if (Math.abs(ils.locDots) < 0.5) ap.locCaptured = true;
 
       // Glideslope tracking
-      if (ils.distNM < 8) {
-        const gsTargetVS = gsPID.update(-ils.gsDots, dt);
-        const vsErr = gsTargetVS - vsFPM;
+      if (ils.distNM < 10) {
+        const targetVS = getApproachTargetVS(state, ils);
+        const vsErr = targetVS - vsFPM;
         ap.pitchCommand = vsPID.update(vsErr, dt);
 
         if (Math.abs(ils.gsDots) < 0.5) ap.gsCaptured = true;
       }
 
-      // Auto-disconnect at minimums (200ft AGL)
-      if (state.altitudeAGL * M_TO_FEET < 200 && ap.gsCaptured) {
+      // APR is expected to manage speed on final even when SPD hold is off.
+      const approachSpeed = getApproachSpeedTarget(state, ils);
+      const spdErr = approachSpeed - state.speed;
+      const throttleDelta = spdPID.update(spdErr, dt);
+      ap.throttleCommand = clamp(state.throttle + throttleDelta * dt, 0.08, 0.95);
+
+      // Auto-disconnect close to touchdown so the flare remains manual.
+      if (state.altitudeAGL * M_TO_FEET < 80 && ap.gsCaptured) {
         disconnectAP('MINIMUMS');
         return;
       }
@@ -280,19 +336,25 @@ export function updateAutopilot(dt) {
     ap.pitchCommand = vsPID.update(vsErr, dt);
   }
 
+  // VNAV mode (flight plan vertical navigation)
+  if (ap.vnavMode && !ap.aprMode) {
+    const vnavVS = getVNAVTargetVS();
+    if (vnavVS !== null) {
+      const vsErr = clamp(vnavVS, -2000, 2000) - vsFPM;
+      ap.pitchCommand = vsPID.update(vsErr, dt);
+    }
+  }
   // VS mode
-  if (ap.vsMode && !ap.aprMode) {
+  else if (ap.vsMode && !ap.aprMode) {
     const vsErr = ap.targetVS - vsFPM;
     ap.pitchCommand = vsPID.update(vsErr, dt);
   }
 
   // Speed hold (auto-throttle)
-  if (ap.spdHold) {
+  if (ap.spdHold && !ap.aprMode) {
     const spdErr = ap.targetSpeed - state.speed;
     const throttleDelta = spdPID.update(spdErr, dt);
     ap.throttleCommand = clamp(state.throttle + throttleDelta * dt, 0, 1);
-  } else {
-    ap.throttleCommand = -1;
   }
 }
 
